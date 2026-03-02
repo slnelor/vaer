@@ -27,7 +27,6 @@ M.defaults = {
     -- model can be provider/model format, eg: openai/gpt-4.1-mini
     model = nil,
     provider = nil,
-    base_url = "https://api.opencode.ai",
     mode = "code",
     session_scope = "project", -- project | buffer
   },

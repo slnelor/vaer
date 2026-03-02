@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Vaer adapter backed by OpenCode Python SDK.
+"""Vaer adapter backed by OpenCode CLI (`opencode run`).
 
 Input: JSON payload via stdin.
 Output: JSON payload via stdout with shape:
@@ -17,16 +17,16 @@ Output: JSON payload via stdout with shape:
 }
 
 Requires:
-  pip install --pre opencode-ai
+  opencode CLI installed and authenticated.
 """
 
 from __future__ import annotations
 
 import hashlib
-import importlib
 import json
 import os
 import re
+import subprocess
 import sys
 from pathlib import Path
 
@@ -122,68 +122,108 @@ def extract_json_object(text: str) -> dict | None:
         except json.JSONDecodeError:
             pass
 
-    first = text.find("{")
-    last = text.rfind("}")
-    if first == -1 or last == -1 or last <= first:
-        return None
-    try:
-        value = json.loads(text[first : last + 1])
-        return value if isinstance(value, dict) else None
-    except json.JSONDecodeError:
-        return None
+    decoder = json.JSONDecoder()
+    for i, ch in enumerate(text):
+        if ch != "{":
+            continue
+        try:
+            value, _ = decoder.raw_decode(text[i:])
+            if isinstance(value, dict):
+                return value
+        except json.JSONDecodeError:
+            continue
+    return None
 
 
 def call_opencode(payload: dict) -> dict:
-    opencode_mod = importlib.import_module("opencode_ai")
-    Opencode = getattr(opencode_mod, "Opencode")
-
     cfg = payload.get("opencode", {}) if isinstance(payload.get("opencode"), dict) else {}
-    model = cfg.get("model") or os.getenv("VAER_MODEL", "openai/gpt-4.1-mini")
+    raw_model = cfg.get("model") or os.getenv("VAER_MODEL")
+    model = raw_model if isinstance(raw_model, str) else ""
     provider_id, model_id = split_model(model)
-    provider_id = cfg.get("provider") or provider_id
-    model_id = cfg.get("model_id") or model_id
-    base_url = cfg.get("base_url") or os.getenv("VAER_OPENCODE_BASE_URL")
-    mode = cfg.get("mode") or "code"
+    provider_override = cfg.get("provider")
+    if isinstance(provider_override, str) and provider_override:
+        provider_id = provider_override
+    if provider_id and model_id:
+        model = f"{provider_id}/{model_id}"
     session_scope = cfg.get("session_scope") or "project"
 
     cwd = payload.get("cwd") or os.getcwd()
     target_file = payload.get("target_file", "")
 
-    client_kwargs = {"timeout": 30.0, "max_retries": 2}
-    if isinstance(base_url, str) and base_url:
-        client_kwargs["base_url"] = base_url
-
-    client = Opencode(**client_kwargs)
     session_id = load_cached_session_id(cwd, session_scope, target_file)
-
-    if not session_id:
-        session = client.session.create()
-        session_id = getattr(session, "id", None)
-        if not isinstance(session_id, str) or not session_id:
-            return {"edits": [], "diagnostics": ["opencode session.create returned no id"]}
-        save_cached_session_id(cwd, session_scope, target_file, session_id)
-
     prompt = build_prompt(payload)
 
-    params = {
-        "id": session_id,
-        "parts": [{"type": "text", "text": prompt}],
-        "mode": mode,
-    }
-    if provider_id:
-        params["provider_id"] = provider_id
-    if model_id:
-        params["model_id"] = model_id
+    cmd = ["opencode", "run", "--format", "json", "--dir", cwd]
+    if model:
+        cmd.extend(["--model", model])
+    if isinstance(session_id, str) and session_id:
+        cmd.extend(["--session", session_id])
+    cmd.append(prompt)
 
-    response = client.session.chat(**params)
+    try:
+        proc = subprocess.run(
+            cmd,
+            text=True,
+            capture_output=True,
+            timeout=45,
+            check=False,
+        )
+    except FileNotFoundError:
+        return {"edits": [], "diagnostics": ["opencode CLI not found in PATH"]}
+    except subprocess.TimeoutExpired:
+        return {"edits": [], "diagnostics": ["opencode run timeout"]}
+
+    if proc.returncode != 0:
+        return {
+            "edits": [],
+            "diagnostics": [
+                f"opencode_exit={proc.returncode}",
+                (proc.stderr or "")[:400],
+            ],
+        }
 
     text_parts: list[str] = []
-    for part in getattr(response, "parts", []) or []:
-        if getattr(part, "type", None) == "text":
-            text_parts.append(getattr(part, "text", ""))
+    event_errors: list[str] = []
+    new_session_id: str | None = None
+    for line in (proc.stdout or "").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            event = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+
+        sid = event.get("sessionID")
+        if isinstance(sid, str) and sid:
+            new_session_id = sid
+
+        if event.get("type") == "error":
+            err = event.get("error")
+            if isinstance(err, dict):
+                data = err.get("data")
+                if isinstance(data, dict) and isinstance(data.get("message"), str):
+                    event_errors.append(data["message"])
+                elif isinstance(err.get("name"), str):
+                    event_errors.append(err["name"])
+
+        if event.get("type") == "text":
+            part = event.get("part", {})
+            if isinstance(part, dict):
+                text = part.get("text")
+                if isinstance(text, str) and text:
+                    text_parts.append(text)
+
+    if new_session_id:
+        save_cached_session_id(cwd, session_scope, target_file, new_session_id)
 
     parsed = extract_json_object("\n".join(text_parts))
     if not isinstance(parsed, dict):
+        if event_errors:
+            return {
+                "edits": [],
+                "diagnostics": event_errors,
+            }
         return {
             "edits": [],
             "diagnostics": ["assistant did not return JSON edits"],
@@ -206,14 +246,6 @@ def main() -> int:
     payload = read_payload()
     try:
         result = call_opencode(payload)
-    except ModuleNotFoundError:
-        result = {
-            "edits": [],
-            "diagnostics": [
-                "opencode_ai not installed",
-                "run: pip install --pre opencode-ai",
-            ],
-        }
     except Exception as e:
         result = {
             "edits": [],

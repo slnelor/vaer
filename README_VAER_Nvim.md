@@ -8,7 +8,7 @@ Neovim plugin prototype for HAND/VAER inline coding flow.
 - Toggle key: `<C-t>` in Normal and Insert mode.
 - Enter in Insert mode dispatches requests only in `VAER`.
 - Line states: `complete`, `progress`, `working`.
-- Spinner animation on working lines: `[.,]` and `[,.]`.
+- Spinner animation on working lines: `[v]`, `[a]`, `[e]`, `[r]`.
 - Treesitter-aware import detection with fallback heuristics.
 - Async request queue with parallel limit and cancellation.
 - Safety gates:
@@ -23,9 +23,8 @@ Neovim plugin prototype for HAND/VAER inline coding flow.
 vim.opt.rtp:append("/home/mikhail/ForPython/vaer/proto/vaer")
 require("vaer").setup({
   opencode = {
-    model = "openai/gpt-4.1-mini",
+    -- model = "openai/gpt-4o-mini", -- optional, must exist in your opencode config
     -- provider = "openai", -- optional override
-    -- base_url = "http://127.0.0.1:4096", -- if using `opencode serve`
     mode = "code",
     session_scope = "project",
   },
@@ -33,18 +32,19 @@ require("vaer").setup({
 ```
 
 The plugin auto-detects and uses bundled adapter: `scripts/vaer_adapter.py`.
+The adapter uses `opencode run` directly (no `opencode serve` required).
 
 ## Dependencies
 
 - Python 3
-- OpenCode Python SDK:
+- OpenCode CLI:
 
 ```bash
-pip install --pre opencode-ai
+curl -fsSL https://opencode.ai/install | bash
 ```
 
-Configure OpenCode/provider auth according to your OpenCode SDK setup.
-If you run a local OpenCode server, set `opencode.base_url` (or env `VAER_OPENCODE_BASE_URL`).
+Configure OpenCode/provider auth via `opencode` CLI.
+If you set `opencode.model`, make sure it exists for your provider (or leave unset to use your `opencode` default model).
 
 ## Adapter protocol
 

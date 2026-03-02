@@ -120,7 +120,6 @@ dispatch_enter = function(bufnr)
     opencode = {
       model = state.opts.opencode.model,
       provider = state.opts.opencode.provider,
-      base_url = state.opts.opencode.base_url,
       mode = state.opts.opencode.mode,
       session_scope = state.opts.opencode.session_scope,
     },
