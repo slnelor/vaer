@@ -205,7 +205,7 @@ function M.toggle_mode()
     line_state.mark_imports_progress(state, bufnr, ts.detect_import_lines(state, bufnr))
     line_state.persist(state, bufnr)
   end
-  log.notify(state, "mode=" .. state.mode, vim.log.levels.INFO)
+  log.notify(state, "[MODE: " .. state.mode .. "]", vim.log.levels.INFO)
   ui.render_all(state)
   state_mod.emit(state, "mode_changed", { mode = state.mode })
 end
@@ -240,7 +240,7 @@ function M.info()
   local b = ensure_buffer_attached(bufnr)
   local progress = line_state.collect_progress_ranges(state, bufnr)
   local msg = string.format(
-    "mode=%s file=%s progress_ranges=%d in_flight=%d queue=%d",
+    "[MODE: %s] file=%s progress_ranges=%d in_flight=%d queue=%d",
     state.mode,
     b.file,
     #progress,

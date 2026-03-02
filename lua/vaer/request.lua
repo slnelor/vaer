@@ -1,4 +1,5 @@
 local log = require("vaer.log")
+local ui = require("vaer.ui")
 
 local M = {}
 
@@ -27,6 +28,7 @@ function M.cancel_all(state)
   state.request.active = {}
   state.request.queue = {}
   state.request.in_flight_count = 0
+  ui.render_task_window(state)
 end
 
 function M.submit(state, payload, on_done)
@@ -37,6 +39,7 @@ function M.submit(state, payload, on_done)
     local cmd = state.opts.request.command
     if type(cmd) ~= "table" or #cmd == 0 then
       state.request.in_flight_count = state.request.in_flight_count - 1
+      ui.render_task_window(state)
       on_done({
         request_id = request_id,
         status = "failed",
@@ -57,6 +60,7 @@ function M.submit(state, payload, on_done)
       vim.schedule(function()
         state.request.active[request_id] = nil
         state.request.in_flight_count = math.max(state.request.in_flight_count - 1, 0)
+        ui.render_task_window(state)
 
         local result = {
           request_id = request_id,
@@ -89,6 +93,7 @@ function M.submit(state, payload, on_done)
     end)
 
     state.request.active[request_id] = { handle = handle }
+    ui.render_task_window(state)
     log.notify(state, "started request " .. request_id, vim.log.levels.DEBUG)
   end
 
@@ -96,6 +101,7 @@ function M.submit(state, payload, on_done)
     run()
   else
     table.insert(state.request.queue, { start = run })
+    ui.render_task_window(state)
   end
 
   return request_id

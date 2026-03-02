@@ -92,6 +92,66 @@ function M.stop_spinner(state)
   state.spinner_timer = nil
 end
 
+local function close_task_window(state)
+  if state.task_win and vim.api.nvim_win_is_valid(state.task_win) then
+    pcall(vim.api.nvim_win_close, state.task_win, true)
+  end
+  if state.task_buf and vim.api.nvim_buf_is_valid(state.task_buf) then
+    pcall(vim.api.nvim_buf_delete, state.task_buf, { force = true })
+  end
+  state.task_win = nil
+  state.task_buf = nil
+end
+
+function M.render_task_window(state)
+  local total = state.request.in_flight_count + #state.request.queue
+  if total <= 1 then
+    close_task_window(state)
+    return
+  end
+
+  local lines = { string.format("Vaer tasks: %d", total) }
+  for request_id, _ in pairs(state.request.active) do
+    table.insert(lines, "- " .. request_id)
+  end
+  if #state.request.queue > 0 then
+    table.insert(lines, string.format("- queued: %d", #state.request.queue))
+  end
+
+  local width = 18
+  for _, line in ipairs(lines) do
+    width = math.max(width, #line + 2)
+  end
+  local height = #lines
+  local col = math.max(0, vim.o.columns - width - 2)
+
+  if not (state.task_buf and vim.api.nvim_buf_is_valid(state.task_buf)) then
+    state.task_buf = vim.api.nvim_create_buf(false, true)
+    vim.bo[state.task_buf].bufhidden = "wipe"
+  end
+
+  vim.api.nvim_buf_set_lines(state.task_buf, 0, -1, false, lines)
+
+  local opts = {
+    relative = "editor",
+    row = 1,
+    col = col,
+    width = width,
+    height = height,
+    style = "minimal",
+    border = "rounded",
+    focusable = false,
+    noautocmd = true,
+  }
+
+  if state.task_win and vim.api.nvim_win_is_valid(state.task_win) then
+    vim.api.nvim_win_set_config(state.task_win, opts)
+  else
+    state.task_win = vim.api.nvim_open_win(state.task_buf, false, opts)
+    vim.wo[state.task_win].winblend = 10
+  end
+end
+
 function M.statusline_mode(state)
   return "VAER:" .. state.mode
 end
