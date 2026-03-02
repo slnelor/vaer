@@ -10,6 +10,7 @@ local persistence = require("vaer.persistence")
 
 local M = {}
 local state = state_mod.new()
+local dispatch_enter
 
 local function detect_plugin_root()
   local matches = vim.api.nvim_get_runtime_file("lua/vaer/init.lua", false)
@@ -38,10 +39,18 @@ local function ensure_buffer_attached(bufnr)
   ui.render_buffer(state, bufnr)
 
   vim.api.nvim_buf_attach(bufnr, false, {
-    on_lines = function(_, buf, _, firstline, _, new_lastline, _)
+    on_lines = function(_, buf, _, firstline, lastline, new_lastline, _)
+      if state.suspend_dispatch then
+        return
+      end
       line_state.mark_changed_range(state, buf, firstline, new_lastline)
       line_state.persist(state, buf)
       ui.render_buffer(state, buf)
+      if state.opts.request.trigger == "newline" and new_lastline > lastline then
+        vim.schedule(function()
+          dispatch_enter(buf)
+        end)
+      end
     end,
     on_detach = function(_, buf)
       state.buffers[buf] = nil
@@ -64,8 +73,11 @@ local function current_buffer_context(bufnr)
   }
 end
 
-local function dispatch_enter(bufnr)
+dispatch_enter = function(bufnr)
   if state.mode ~= "VAER" then
+    return
+  end
+  if state.suspend_dispatch then
     return
   end
 
@@ -107,7 +119,9 @@ local function dispatch_enter(bufnr)
       return
     end
 
+    state.suspend_dispatch = true
     local apply_result = apply.apply_result(state, bufnr, ctx, result)
+    state.suspend_dispatch = false
     if apply_result.status == "retry" and state.opts.stale_strategy == "retry" then
       line_state.restore_working_to_progress(state, bufnr)
       ui.render_buffer(state, bufnr)
@@ -129,6 +143,9 @@ local function dispatch_enter(bufnr)
 end
 
 local function map_enter()
+  if state.opts.request.trigger ~= "enter" then
+    return
+  end
   vim.keymap.set("i", "<CR>", function()
     if vim.fn.pumvisible() == 1 then
       return "<C-y>"

@@ -21,6 +21,7 @@ M.defaults = {
     -- JSON out: { edits = [{ target_file, start_line, end_line, replacement_lines, reason? }] }
     command = nil,
     timeout_ms = 30000,
+    trigger = "newline", -- newline | enter
   },
   opencode = {
     -- model can be provider/model format, eg: openai/gpt-4.1-mini
