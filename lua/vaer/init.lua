@@ -46,11 +46,7 @@ local function ensure_buffer_attached(bufnr)
       line_state.mark_changed_range(state, buf, firstline, new_lastline)
       line_state.persist(state, buf)
       ui.render_buffer(state, buf)
-      if state.opts.request.trigger == "newline" and new_lastline > lastline then
-        vim.schedule(function()
-          dispatch_enter(buf)
-        end)
-      end
+      _ = lastline
     end,
     on_detach = function(_, buf)
       state.buffers[buf] = nil
@@ -73,6 +69,18 @@ local function current_buffer_context(bufnr)
   }
 end
 
+local function has_non_empty_progress_content(bufnr, ranges)
+  for _, r in ipairs(ranges) do
+    local lines = vim.api.nvim_buf_get_lines(bufnr, r.start_line - 1, r.end_line, false)
+    for _, line in ipairs(lines) do
+      if vim.trim(line) ~= "" then
+        return true
+      end
+    end
+  end
+  return false
+end
+
 dispatch_enter = function(bufnr)
   if state.mode ~= "VAER" then
     return
@@ -85,12 +93,19 @@ dispatch_enter = function(bufnr)
   if #ctx.progress_ranges == 0 then
     return
   end
+  if not has_non_empty_progress_content(bufnr, ctx.progress_ranges) then
+    return
+  end
+
+  local file_text = table.concat(vim.api.nvim_buf_get_lines(bufnr, 0, -1, false), "\n")
+  if vim.trim(file_text) == "" then
+    return
+  end
 
   line_state.mark_working_ranges(state, bufnr, ctx.progress_ranges)
   ui.render_buffer(state, bufnr)
   ui.start_spinner(state)
 
-  local file_text = table.concat(vim.api.nvim_buf_get_lines(bufnr, 0, -1, false), "\n")
   local payload = {
     target_file = ctx.target_file,
     changedtick = ctx.changedtick_at_start,
@@ -105,6 +120,7 @@ dispatch_enter = function(bufnr)
     opencode = {
       model = state.opts.opencode.model,
       provider = state.opts.opencode.provider,
+      base_url = state.opts.opencode.base_url,
       mode = state.opts.opencode.mode,
       session_scope = state.opts.opencode.session_scope,
     },
@@ -116,6 +132,18 @@ dispatch_enter = function(bufnr)
       line_state.persist(state, bufnr)
       ui.render_buffer(state, bufnr)
       log.notify(state, "request failed: " .. table.concat(result.diagnostics or {}, " | "), vim.log.levels.WARN)
+      return
+    end
+
+    if not result.edits or #result.edits == 0 then
+      line_state.restore_working_to_progress(state, bufnr)
+      line_state.persist(state, bufnr)
+      ui.render_buffer(state, bufnr)
+      local details = table.concat(result.diagnostics or {}, " | ")
+      if details == "" then
+        details = "no edits returned"
+      end
+      log.notify(state, "no edits: " .. details, vim.log.levels.WARN)
       return
     end
 
@@ -143,7 +171,7 @@ dispatch_enter = function(bufnr)
 end
 
 local function map_enter()
-  if state.opts.request.trigger ~= "enter" then
+  if state.opts.request.trigger ~= "enter" and state.opts.request.trigger ~= "newline" then
     return
   end
   vim.keymap.set("i", "<CR>", function()

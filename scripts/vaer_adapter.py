@@ -142,13 +142,18 @@ def call_opencode(payload: dict) -> dict:
     provider_id, model_id = split_model(model)
     provider_id = cfg.get("provider") or provider_id
     model_id = cfg.get("model_id") or model_id
+    base_url = cfg.get("base_url") or os.getenv("VAER_OPENCODE_BASE_URL")
     mode = cfg.get("mode") or "code"
     session_scope = cfg.get("session_scope") or "project"
 
     cwd = payload.get("cwd") or os.getcwd()
     target_file = payload.get("target_file", "")
 
-    client = Opencode(timeout=30.0, max_retries=2)
+    client_kwargs = {"timeout": 30.0, "max_retries": 2}
+    if isinstance(base_url, str) and base_url:
+        client_kwargs["base_url"] = base_url
+
+    client = Opencode(**client_kwargs)
     session_id = load_cached_session_id(cwd, session_scope, target_file)
 
     if not session_id:

@@ -25,6 +25,7 @@ require("vaer").setup({
   opencode = {
     model = "openai/gpt-4.1-mini",
     -- provider = "openai", -- optional override
+    -- base_url = "http://127.0.0.1:4096", -- if using `opencode serve`
     mode = "code",
     session_scope = "project",
   },
@@ -43,6 +44,7 @@ pip install --pre opencode-ai
 ```
 
 Configure OpenCode/provider auth according to your OpenCode SDK setup.
+If you run a local OpenCode server, set `opencode.base_url` (or env `VAER_OPENCODE_BASE_URL`).
 
 ## Adapter protocol
 

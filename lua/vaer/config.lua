@@ -2,7 +2,7 @@ local M = {}
 
 M.defaults = {
   mode = "HAND",
-  spinner_frames = { "[.,]", "[,.]" },
+  spinner_frames = { "[v]", "[a]", "[e]", "[r]" },
   spinner_interval_ms = 120,
   max_parallel_requests = 4,
   stale_strategy = "skip", -- skip | retry
@@ -27,6 +27,7 @@ M.defaults = {
     -- model can be provider/model format, eg: openai/gpt-4.1-mini
     model = nil,
     provider = nil,
+    base_url = "https://api.opencode.ai",
     mode = "code",
     session_scope = "project", -- project | buffer
   },

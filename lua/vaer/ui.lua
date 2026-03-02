@@ -34,8 +34,10 @@ function M.render_buffer(state, bufnr)
       if b.status_by_line[line] == line_state.WORKING then
         vim.api.nvim_buf_set_extmark(bufnr, state.ns, line - 1, 0, {
           virt_text = { { current_frame, "VaerSpinner" } },
-          virt_text_pos = "eol",
+          virt_text_pos = "overlay",
+          virt_text_win_col = 0,
           hl_mode = "combine",
+          priority = 200,
         })
       end
     end
