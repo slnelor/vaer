@@ -90,6 +90,12 @@ local function dispatch_enter(bufnr)
       can_run_tools = true,
       can_modify_only_current_file = true,
     },
+    opencode = {
+      model = state.opts.opencode.model,
+      provider = state.opts.opencode.provider,
+      mode = state.opts.opencode.mode,
+      session_scope = state.opts.opencode.session_scope,
+    },
   }
 
   request.submit(state, payload, function(result)

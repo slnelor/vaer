@@ -1,26 +1,9 @@
-from dataclasses import dataclass
 import os
 
-
-@dataclass(frozen=True)
-class ProviderConfig:
-    base_url: str
-    api_key_env: str
-
-
-PROVIDER_SERVERS = {
-    "openai": ProviderConfig(
-        base_url="https://api.openai.com/v1",
-        api_key_env="OPENAI_API_KEY",
-    ),
-    "openrouter": ProviderConfig(
-        base_url="https://openrouter.ai/api/v1",
-        api_key_env="OPENROUTER_API_KEY",
-    ),
-}
-
-
 DEFAULT_MODEL = os.getenv("VAER_MODEL", "openai/gpt-4.1-mini")
+DEFAULT_PROVIDER = os.getenv("VAER_PROVIDER", "openai")
+DEFAULT_AGENT_MODE = os.getenv("VAER_AGENT_MODE", "code")
+SESSION_SCOPE = os.getenv("VAER_SESSION_SCOPE", "project")
 REQUEST_TIMEOUT_SEC = float(os.getenv("VAER_TIMEOUT_SEC", "25"))
 MAX_PARALLEL_REQUESTS = int(os.getenv("VAER_MAX_PARALLEL", "4"))
 SPINNER_INTERVAL_MS = int(os.getenv("VAER_SPINNER_MS", "120"))

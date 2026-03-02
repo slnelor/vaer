@@ -16,10 +16,18 @@ M.defaults = {
   },
   request = {
     -- External adapter command that receives JSON via stdin and returns JSON on stdout.
+    -- Default bundled adapter uses OpenCode Python SDK (opencode_ai).
     -- JSON in: { target_file, changedtick, progress_ranges, file_text, cwd, permissions }
     -- JSON out: { edits = [{ target_file, start_line, end_line, replacement_lines, reason? }] }
     command = nil,
     timeout_ms = 30000,
+  },
+  opencode = {
+    -- model can be provider/model format, eg: openai/gpt-4.1-mini
+    model = nil,
+    provider = nil,
+    mode = "code",
+    session_scope = "project", -- project | buffer
   },
   treesitter = {
     enable = true,
