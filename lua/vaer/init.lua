@@ -11,6 +11,17 @@ local persistence = require("vaer.persistence")
 local M = {}
 local state = state_mod.new()
 
+local function detect_plugin_root()
+  local matches = vim.api.nvim_get_runtime_file("lua/vaer/init.lua", false)
+  if not matches or #matches == 0 then
+    return vim.uv.cwd()
+  end
+  local init_file = matches[1]
+  local vaer_dir = vim.fs.dirname(init_file)
+  local lua_dir = vim.fs.dirname(vaer_dir)
+  return vim.fs.dirname(lua_dir)
+end
+
 local function merge_opts(opts)
   return vim.tbl_deep_extend("force", vim.deepcopy(config.defaults), opts or {})
 end
@@ -163,6 +174,11 @@ function M.setup(opts)
   state.mode = state.opts.mode
   state.project_root = vim.uv.cwd()
   state.log_path = state.project_root .. "/tmp/vaer/vaer.log"
+
+  if not state.opts.request.command then
+    local plugin_root = detect_plugin_root()
+    state.opts.request.command = { "python3", plugin_root .. "/scripts/vaer_adapter.py" }
+  end
 
   persistence.ensure_dir(state)
   setup_autocmds()
