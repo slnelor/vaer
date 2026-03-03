@@ -83,6 +83,14 @@ def save_cached_session_id(cwd: str, scope: str, target_file: str, session_id: s
     path.write_text(json.dumps({"session_id": session_id}), encoding="utf-8")
 
 
+def clear_cached_session_id(cwd: str, scope: str, target_file: str):
+    path = cache_dir(cwd) / session_key(cwd, scope, target_file)
+    try:
+        path.unlink(missing_ok=True)
+    except Exception:
+        pass
+
+
 def build_prompt(payload: dict) -> str:
     target_file = payload.get("target_file", "")
     progress_ranges = payload.get("progress_ranges", [])
@@ -153,14 +161,14 @@ def call_opencode(payload: dict) -> dict:
     session_id = load_cached_session_id(cwd, session_scope, target_file)
     prompt = build_prompt(payload)
 
-    cmd = ["opencode", "run", "--format", "json", "--dir", cwd]
-    if model:
-        cmd.extend(["--model", model])
-    if isinstance(session_id, str) and session_id:
-        cmd.extend(["--session", session_id])
-    cmd.append(prompt)
+    def run_once(use_session: bool, use_model: bool):
+        cmd = ["opencode", "run", "--format", "json", "--dir", cwd]
+        if use_model and model:
+            cmd.extend(["--model", model])
+        if use_session and isinstance(session_id, str) and session_id:
+            cmd.extend(["--session", session_id])
+        cmd.append(prompt)
 
-    try:
         proc = subprocess.run(
             cmd,
             text=True,
@@ -168,12 +176,57 @@ def call_opencode(payload: dict) -> dict:
             timeout=45,
             check=False,
         )
+
+        text_parts_local: list[str] = []
+        event_errors_local: list[str] = []
+        new_session_id_local: str | None = None
+
+        for line in (proc.stdout or "").splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                event = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+
+            sid = event.get("sessionID")
+            if isinstance(sid, str) and sid:
+                new_session_id_local = sid
+
+            if event.get("type") == "error":
+                err = event.get("error")
+                if isinstance(err, dict):
+                    data = err.get("data")
+                    if isinstance(data, dict) and isinstance(data.get("message"), str):
+                        event_errors_local.append(data["message"])
+                    elif isinstance(err.get("name"), str):
+                        event_errors_local.append(err["name"])
+
+            if event.get("type") == "text":
+                part = event.get("part", {})
+                if isinstance(part, dict):
+                    text = part.get("text")
+                    if isinstance(text, str) and text:
+                        text_parts_local.append(text)
+
+        return proc, text_parts_local, event_errors_local, new_session_id_local
+
+    try:
+        proc, text_parts, event_errors, new_session_id = run_once(True, True)
     except FileNotFoundError:
         return {"edits": [], "diagnostics": ["opencode CLI not found in PATH"]}
     except subprocess.TimeoutExpired:
         return {"edits": [], "diagnostics": ["opencode run timeout"]}
 
-    if proc.returncode != 0:
+    if event_errors and any("Model not found:" in e for e in event_errors):
+        clear_cached_session_id(cwd, session_scope, target_file)
+        try:
+            proc, text_parts, event_errors, new_session_id = run_once(False, False)
+        except subprocess.TimeoutExpired:
+            return {"edits": [], "diagnostics": ["opencode run timeout"]}
+
+    if proc.returncode != 0 and not event_errors:
         return {
             "edits": [],
             "diagnostics": [
@@ -182,39 +235,7 @@ def call_opencode(payload: dict) -> dict:
             ],
         }
 
-    text_parts: list[str] = []
-    event_errors: list[str] = []
-    new_session_id: str | None = None
-    for line in (proc.stdout or "").splitlines():
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            event = json.loads(line)
-        except json.JSONDecodeError:
-            continue
-
-        sid = event.get("sessionID")
-        if isinstance(sid, str) and sid:
-            new_session_id = sid
-
-        if event.get("type") == "error":
-            err = event.get("error")
-            if isinstance(err, dict):
-                data = err.get("data")
-                if isinstance(data, dict) and isinstance(data.get("message"), str):
-                    event_errors.append(data["message"])
-                elif isinstance(err.get("name"), str):
-                    event_errors.append(err["name"])
-
-        if event.get("type") == "text":
-            part = event.get("part", {})
-            if isinstance(part, dict):
-                text = part.get("text")
-                if isinstance(text, str) and text:
-                    text_parts.append(text)
-
-    if new_session_id:
+    if isinstance(new_session_id, str) and new_session_id:
         save_cached_session_id(cwd, session_scope, target_file, new_session_id)
 
     parsed = extract_json_object("\n".join(text_parts))
