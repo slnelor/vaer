@@ -90,12 +90,15 @@ function M.apply_result(state, bufnr, ctx, result)
   end
 
   local edits = {}
+  local max_edit_count = (state.opts.apply and state.opts.apply.max_edit_count) or 8
   local max_edit_lines = (state.opts.apply and state.opts.apply.max_edit_lines) or 120
   local max_replacement_lines = (state.opts.apply and state.opts.apply.max_replacement_lines) or 240
+  local max_total_replacement_lines = (state.opts.apply and state.opts.apply.max_total_replacement_lines) or 480
   local reject_blank_replacements = state.opts.apply == nil
     or state.opts.apply.reject_blank_replacements == nil
     or state.opts.apply.reject_blank_replacements
   local buf_line_count = vim.api.nvim_buf_line_count(bufnr)
+  local total_replacement_lines = 0
 
   for _, raw in ipairs(result.edits or {}) do
     local edit = normalize_edit(raw)
@@ -112,6 +115,14 @@ function M.apply_result(state, bufnr, ctx, result)
     end
 
     if #edit.replacement_lines > max_replacement_lines then
+      goto continue
+    end
+
+    if #edits >= max_edit_count then
+      goto continue
+    end
+
+    if (total_replacement_lines + #edit.replacement_lines) > max_total_replacement_lines then
       goto continue
     end
 
@@ -135,6 +146,7 @@ function M.apply_result(state, bufnr, ctx, result)
       goto continue
     end
     table.insert(edits, edit)
+    total_replacement_lines = total_replacement_lines + #edit.replacement_lines
     ::continue::
   end
 

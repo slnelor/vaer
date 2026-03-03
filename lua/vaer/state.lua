@@ -50,6 +50,7 @@ function M.get_buf(state, bufnr)
     pending_dispatch = false,
     request_in_flight = false,
     persist_scheduled = false,
+    render_scheduled = false,
   }
   state.buffers[bufnr] = b
   return b

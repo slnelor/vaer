@@ -115,6 +115,21 @@ local function schedule_persist(bufnr)
   end, 250)
 end
 
+local function schedule_render(bufnr)
+  local b = state_mod.get_buf(state, bufnr)
+  if b.render_scheduled then
+    return
+  end
+  b.render_scheduled = true
+  vim.defer_fn(function()
+    if vim.api.nvim_buf_is_valid(bufnr) then
+      local b2 = state_mod.get_buf(state, bufnr)
+      b2.render_scheduled = false
+      ui.render_buffer(state, bufnr)
+    end
+  end, state.opts.request.render_debounce_ms or 40)
+end
+
 local function ensure_buffer_attached(bufnr)
   local b = state_mod.get_buf(state, bufnr)
   if b.attached then
@@ -134,7 +149,7 @@ local function ensure_buffer_attached(bufnr)
       local bs = state_mod.get_buf(state, buf)
       local prev_line_count = bs.last_line_count
       line_state.mark_changed_range(state, buf, firstline, new_lastline)
-      ui.render_buffer(state, buf)
+      schedule_render(buf)
 
       if state.mode == "VAER" and state.opts.request.trigger == "newline" then
         local current_line_count = vim.api.nvim_buf_line_count(buf)
@@ -157,12 +172,45 @@ end
 
 local function current_buffer_context(bufnr)
   local b = ensure_buffer_attached(bufnr)
+  local cursor = vim.api.nvim_win_get_cursor(0)
   return {
     bufnr = bufnr,
     target_file = b.file,
+    cursor_line = cursor[1],
     changedtick_at_start = vim.api.nvim_buf_get_changedtick(bufnr),
     progress_ranges = line_state.collect_progress_ranges(state, bufnr),
   }
+end
+
+local function select_nearby_ranges(progress_ranges, cursor_line)
+  local max_ranges = state.opts.request.max_progress_ranges or 12
+  if #progress_ranges <= max_ranges then
+    return progress_ranges
+  end
+
+  local scored = {}
+  for _, r in ipairs(progress_ranges) do
+    local center = math.floor((r.start_line + r.end_line) / 2)
+    table.insert(scored, {
+      range = r,
+      distance = math.abs(center - cursor_line),
+    })
+  end
+
+  table.sort(scored, function(a, b)
+    return a.distance < b.distance
+  end)
+
+  local out = {}
+  for i = 1, math.min(max_ranges, #scored) do
+    table.insert(out, scored[i].range)
+  end
+
+  table.sort(out, function(a, b)
+    return a.start_line < b.start_line
+  end)
+
+  return out
 end
 
 local function has_non_empty_progress_content(bufnr, ranges)
@@ -194,6 +242,12 @@ dispatch_enter = function(bufnr)
   if #ctx.progress_ranges == 0 then
     return
   end
+
+  ctx.progress_ranges = select_nearby_ranges(ctx.progress_ranges, ctx.cursor_line)
+  if #ctx.progress_ranges == 0 then
+    return
+  end
+
   if not has_non_empty_progress_content(bufnr, ctx.progress_ranges) then
     return
   end
@@ -234,7 +288,7 @@ dispatch_enter = function(bufnr)
     if result.status ~= "success" then
       line_state.restore_working_to_progress(state, bufnr)
       schedule_persist(bufnr)
-      ui.render_buffer(state, bufnr)
+      schedule_render(bufnr)
       log.notify(state, "request failed: " .. table.concat(result.diagnostics or {}, " | "), vim.log.levels.WARN)
       return
     end
@@ -242,7 +296,7 @@ dispatch_enter = function(bufnr)
     if not result.edits or #result.edits == 0 then
       line_state.restore_working_to_progress(state, bufnr)
       schedule_persist(bufnr)
-      ui.render_buffer(state, bufnr)
+      schedule_render(bufnr)
       local details = table.concat(result.diagnostics or {}, " | ")
       if details == "" then
         details = "no edits returned"
@@ -257,7 +311,7 @@ dispatch_enter = function(bufnr)
     if apply_result.status == "retry" and state.opts.stale_strategy == "retry" then
       line_state.restore_working_to_progress(state, bufnr)
       schedule_persist(bufnr)
-      ui.render_buffer(state, bufnr)
+      schedule_render(bufnr)
       schedule_dispatch(bufnr, 120)
       return
     end
@@ -265,7 +319,7 @@ dispatch_enter = function(bufnr)
     if apply_result.status == "stale" then
       line_state.restore_working_to_progress(state, bufnr)
       schedule_persist(bufnr)
-      ui.render_buffer(state, bufnr)
+      schedule_render(bufnr)
       if state.opts.stale_strategy == "retry" then
         schedule_dispatch(bufnr, 120)
       end
@@ -275,13 +329,13 @@ dispatch_enter = function(bufnr)
     if apply_result.status ~= "success" then
       line_state.restore_working_to_progress(state, bufnr)
       schedule_persist(bufnr)
-      ui.render_buffer(state, bufnr)
+      schedule_render(bufnr)
       log.notify(state, "apply blocked: " .. table.concat(apply_result.diagnostics or {}, " | "), vim.log.levels.WARN)
       return
     end
 
     schedule_persist(bufnr)
-    ui.render_buffer(state, bufnr)
+    schedule_render(bufnr)
     local suffix = ""
     if apply_result.diagnostics and #apply_result.diagnostics > 0 then
       suffix = " (" .. table.concat(apply_result.diagnostics, ",") .. ")"

@@ -16,7 +16,7 @@ M.defaults = {
   },
   request = {
     -- External adapter command that receives JSON via stdin and returns JSON on stdout.
-    -- Default bundled adapter uses OpenCode Python SDK (opencode_ai).
+    -- Default bundled adapter uses OpenCode CLI (`opencode run`).
     -- JSON in: { target_file, changedtick, progress_ranges, file_text, cwd, permissions }
     -- JSON out: { edits = [{ target_file, start_line, end_line, replacement_lines, reason? }] }
     command = nil,
@@ -24,14 +24,21 @@ M.defaults = {
     trigger = "newline", -- newline | enter
     allow_stale_apply = true,
     debounce_ms = 300,
+    render_debounce_ms = 40,
     context_radius = 24,
     max_payload_chars = 16000,
     cancel_active_on_supersede = true,
+    max_progress_ranges = 12,
   },
   apply = {
+    max_edit_count = 8,
     max_edit_lines = 120,
     max_replacement_lines = 240,
+    max_total_replacement_lines = 480,
     reject_blank_replacements = true,
+  },
+  safety = {
+    max_cached_progress_lines = 500,
   },
   opencode = {
     -- model can be provider/model format, eg: openai/gpt-4.1-mini

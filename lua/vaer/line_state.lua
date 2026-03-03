@@ -18,17 +18,25 @@ function M.initialize_for_buffer(state, bufnr)
   b.status_by_line = {}
 
   local cached = persistence.load(state, file)
+  local loaded_count = 0
   if type(cached) == "table" then
     for k, v in pairs(cached) do
       local line = tonumber(k)
       if line and line >= 1 and line <= count and type(v) == "string" then
         if v == PROGRESS then
           b.status_by_line[line] = PROGRESS
+          loaded_count = loaded_count + 1
         elseif v == WORKING then
           b.status_by_line[line] = PROGRESS
+          loaded_count = loaded_count + 1
         end
       end
     end
+  end
+
+  local max_cached = (state.opts.safety and state.opts.safety.max_cached_progress_lines) or 500
+  if loaded_count > max_cached then
+    b.status_by_line = {}
   end
 
   b.last_changedtick = vim.api.nvim_buf_get_changedtick(bufnr)
