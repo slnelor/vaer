@@ -15,16 +15,18 @@ function M.initialize_for_buffer(state, bufnr)
   local file = b.file
   local count = vim.api.nvim_buf_line_count(bufnr)
 
-  for i = 1, count do
-    b.status_by_line[i] = COMPLETE
-  end
+  b.status_by_line = {}
 
   local cached = persistence.load(state, file)
   if type(cached) == "table" then
     for k, v in pairs(cached) do
       local line = tonumber(k)
       if line and line >= 1 and line <= count and type(v) == "string" then
-        b.status_by_line[line] = v
+        if v == PROGRESS then
+          b.status_by_line[line] = PROGRESS
+        elseif v == WORKING then
+          b.status_by_line[line] = PROGRESS
+        end
       end
     end
   end
@@ -111,7 +113,7 @@ function M.mark_ranges_complete(state, bufnr, ranges)
   local b = require("vaer.state").get_buf(state, bufnr)
   for _, r in ipairs(ranges) do
     for i = r.start_line, r.end_line do
-      b.status_by_line[i] = COMPLETE
+      b.status_by_line[i] = nil
     end
   end
   b.working_ranges = {}
@@ -131,10 +133,7 @@ end
 
 function M.complete_all(state, bufnr)
   local b = require("vaer.state").get_buf(state, bufnr)
-  local count = vim.api.nvim_buf_line_count(bufnr)
-  for i = 1, count do
-    b.status_by_line[i] = COMPLETE
-  end
+  b.status_by_line = {}
   b.working_ranges = {}
   M.persist(state, bufnr)
 end

@@ -11,6 +11,22 @@ local M = {}
 local state = state_mod.new()
 local dispatch_enter
 
+local function schedule_dispatch(bufnr, delay_ms)
+  local b = state_mod.get_buf(state, bufnr)
+  if b.dispatch_scheduled then
+    return
+  end
+  b.dispatch_scheduled = true
+  vim.defer_fn(function()
+    if not vim.api.nvim_buf_is_valid(bufnr) then
+      return
+    end
+    local b2 = state_mod.get_buf(state, bufnr)
+    b2.dispatch_scheduled = false
+    dispatch_enter(bufnr)
+  end, delay_ms or 40)
+end
+
 local function detect_plugin_root()
   local matches = vim.api.nvim_get_runtime_file("lua/vaer/init.lua", false)
   if not matches or #matches == 0 then
@@ -66,16 +82,8 @@ local function ensure_buffer_attached(bufnr)
       if state.mode == "VAER" and state.opts.request.trigger == "newline" then
         local current_line_count = vim.api.nvim_buf_line_count(buf)
         local newline_created = (new_lastline > lastline) or (current_line_count > prev_line_count)
-        if newline_created and not bs.dispatch_scheduled then
-          bs.dispatch_scheduled = true
-          vim.defer_fn(function()
-            if not vim.api.nvim_buf_is_valid(buf) then
-              return
-            end
-            local b2 = state_mod.get_buf(state, buf)
-            b2.dispatch_scheduled = false
-            dispatch_enter(buf)
-          end, 40)
+        if newline_created then
+          schedule_dispatch(buf, 40)
         end
       end
     end,
@@ -191,8 +199,19 @@ dispatch_enter = function(bufnr)
     state.suspend_dispatch = false
     if apply_result.status == "retry" and state.opts.stale_strategy == "retry" then
       line_state.restore_working_to_progress(state, bufnr)
+      schedule_persist(bufnr)
       ui.render_buffer(state, bufnr)
-      dispatch_enter(bufnr)
+      schedule_dispatch(bufnr, 120)
+      return
+    end
+
+    if apply_result.status == "stale" then
+      line_state.restore_working_to_progress(state, bufnr)
+      schedule_persist(bufnr)
+      ui.render_buffer(state, bufnr)
+      if state.opts.stale_strategy == "retry" then
+        schedule_dispatch(bufnr, 120)
+      end
       return
     end
 
