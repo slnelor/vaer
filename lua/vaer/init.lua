@@ -290,6 +290,7 @@ dispatch_enter = function(bufnr)
   end, {
     key = "buf:" .. tostring(bufnr),
     supersede = true,
+    cancel_active_on_supersede = state.opts.request.cancel_active_on_supersede,
   })
 end
 

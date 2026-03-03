@@ -45,6 +45,7 @@ function M.submit(state, payload, on_done, opts)
   opts = opts or {}
   local key = opts.key
   local supersede = opts.supersede == true
+  local cancel_active = opts.cancel_active_on_supersede == true
 
   if supersede and type(key) == "string" and state.request.active_by_key[key] then
     state.request.pending_by_key[key] = {
@@ -52,6 +53,15 @@ function M.submit(state, payload, on_done, opts)
       on_done = on_done,
       opts = opts,
     }
+
+    if cancel_active then
+      local active_request_id = state.request.active_by_key[key]
+      local active = active_request_id and state.request.active[active_request_id] or nil
+      if active and active.handle and active.handle.kill then
+        pcall(active.handle.kill, active.handle, 15)
+      end
+    end
+
     return state.request.active_by_key[key]
   end
 

@@ -15,10 +15,15 @@ local function normalize_edit(edit)
   if type(edit.replacement_lines) ~= "table" then
     return nil
   end
+  local s = math.floor(edit.start_line)
+  local e = math.floor(edit.end_line)
+  if e < s then
+    s, e = e, s
+  end
   return {
     target_file = edit.target_file,
-    start_line = math.floor(edit.start_line),
-    end_line = math.floor(edit.end_line),
+    start_line = s,
+    end_line = e,
     replacement_lines = edit.replacement_lines,
     reason = edit.reason,
   }
@@ -49,6 +54,28 @@ local function is_destructive_empty(edit)
   return edit.end_line >= edit.start_line
 end
 
+local function is_blank_only(lines)
+  for _, line in ipairs(lines) do
+    if vim.trim(line) ~= "" then
+      return false
+    end
+  end
+  return true
+end
+
+local function is_noop_edit(bufnr, edit)
+  local current = vim.api.nvim_buf_get_lines(bufnr, edit.start_line - 1, edit.end_line, false)
+  if #current ~= #edit.replacement_lines then
+    return false
+  end
+  for i = 1, #current do
+    if current[i] ~= edit.replacement_lines[i] then
+      return false
+    end
+  end
+  return true
+end
+
 function M.apply_result(state, bufnr, ctx, result)
   if not vim.api.nvim_buf_is_valid(bufnr) then
     return { status = "failed", diagnostics = { "invalid_buffer" } }
@@ -63,11 +90,31 @@ function M.apply_result(state, bufnr, ctx, result)
   end
 
   local edits = {}
+  local max_edit_lines = (state.opts.apply and state.opts.apply.max_edit_lines) or 120
+  local max_replacement_lines = (state.opts.apply and state.opts.apply.max_replacement_lines) or 240
+  local reject_blank_replacements = state.opts.apply == nil
+    or state.opts.apply.reject_blank_replacements == nil
+    or state.opts.apply.reject_blank_replacements
+  local buf_line_count = vim.api.nvim_buf_line_count(bufnr)
+
   for _, raw in ipairs(result.edits or {}) do
     local edit = normalize_edit(raw)
     if not edit then
       return { status = "failed", diagnostics = { "malformed_edit" } }
     end
+
+    if edit.start_line < 1 or edit.end_line > buf_line_count then
+      goto continue
+    end
+
+    if (edit.end_line - edit.start_line + 1) > max_edit_lines then
+      goto continue
+    end
+
+    if #edit.replacement_lines > max_replacement_lines then
+      goto continue
+    end
+
     if edit.target_file ~= ctx.target_file then
       return { status = "failed", blocked_reason = "blocked_non_current_file_edit", diagnostics = { "cross_file_write_blocked" } }
     end
@@ -77,8 +124,14 @@ function M.apply_result(state, bufnr, ctx, result)
     if is_destructive_empty(edit) then
       goto continue
     end
+    if reject_blank_replacements and is_blank_only(edit.replacement_lines) then
+      goto continue
+    end
     local ok, msg = validate_no_complete_lines(state, bufnr, edit)
     if not ok then
+      goto continue
+    end
+    if is_noop_edit(bufnr, edit) then
       goto continue
     end
     table.insert(edits, edit)

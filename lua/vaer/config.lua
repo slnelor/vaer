@@ -26,6 +26,12 @@ M.defaults = {
     debounce_ms = 300,
     context_radius = 24,
     max_payload_chars = 16000,
+    cancel_active_on_supersede = true,
+  },
+  apply = {
+    max_edit_lines = 120,
+    max_replacement_lines = 240,
+    reject_blank_replacements = true,
   },
   opencode = {
     -- model can be provider/model format, eg: openai/gpt-4.1-mini
