@@ -43,8 +43,8 @@ M.defaults = {
     max_cached_progress_lines = 500,
   },
   opencode = {
-    -- model can be provider/model format, eg: openai/gpt-4.1-mini
-    model = "openai/gpt-oss-120b",
+    -- model can be provider/model format, eg: openai/gpt-5.3-codex
+    model = "openai/gpt-5.3-codex",
     provider = nil,
     mode = "code",
     session_scope = "project", -- project | buffer

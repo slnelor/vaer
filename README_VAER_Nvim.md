@@ -23,7 +23,7 @@ Neovim plugin prototype for HAND/VAER inline coding flow.
 vim.opt.rtp:append("/home/mikhail/ForPython/vaer/proto/vaer")
 require("vaer").setup({
   opencode = {
-    -- model = "openai/gpt-oss-120b", -- default in plugin, override if needed
+    -- model = "openai/gpt-5.3-codex", -- default in plugin, override if needed
     -- provider = "openai", -- optional override
     mode = "code",
     session_scope = "project",
@@ -72,7 +72,7 @@ Plugin sends JSON via stdin:
     "can_modify_only_current_file": true
   },
   "opencode": {
-    "model": "openai/gpt-4.1-mini",
+    "model": "openai/gpt-5.3-codex",
     "provider": "openai",
     "mode": "code",
     "session_scope": "project"
