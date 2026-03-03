@@ -357,11 +357,7 @@ dispatch_enter = function(bufnr)
 
     schedule_persist(bufnr)
     schedule_render(bufnr)
-    local suffix = ""
-    if apply_result.diagnostics and #apply_result.diagnostics > 0 then
-      suffix = " (" .. table.concat(apply_result.diagnostics, ",") .. ")"
-    end
-    log.notify(state, "applied vaer edits" .. suffix, vim.log.levels.INFO)
+    log.notify(state, "applied vaer edits", vim.log.levels.INFO)
   end, {
     key = "buf:" .. tostring(bufnr),
     supersede = true,
