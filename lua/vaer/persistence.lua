@@ -24,9 +24,16 @@ function M.save(state, file_path, status_by_line)
     return
   end
   M.ensure_dir(state)
+  local status_map = {}
+  for line, status in pairs(status_by_line or {}) do
+    if type(line) == "number" and type(status) == "string" then
+      status_map[tostring(line)] = status
+    end
+  end
+
   local payload = {
     target_file = file_path,
-    status_by_line = status_by_line,
+    status_by_line = status_map,
   }
   local encoded = vim.json.encode(payload)
   vim.fn.writefile({ encoded }, state_path(state, file_path), "b")
