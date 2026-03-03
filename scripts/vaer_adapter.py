@@ -26,6 +26,7 @@ import hashlib
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -161,8 +162,16 @@ def call_opencode(payload: dict) -> dict:
     session_id = load_cached_session_id(cwd, session_scope, target_file)
     prompt = build_prompt(payload)
 
+    opencode_bin = shutil.which("opencode")
+    if not opencode_bin:
+        home_bin = Path.home() / ".opencode" / "bin" / "opencode"
+        if home_bin.exists():
+            opencode_bin = str(home_bin)
+    if not opencode_bin:
+        return {"edits": [], "diagnostics": ["opencode CLI not found in PATH"]}
+
     def run_once(use_session: bool, use_model: bool):
-        cmd = ["opencode", "run", "--format", "json", "--dir", cwd]
+        cmd = [opencode_bin, "run", "--format", "json", "--dir", cwd]
         if use_model and model:
             cmd.extend(["--model", model])
         if use_session and isinstance(session_id, str) and session_id:

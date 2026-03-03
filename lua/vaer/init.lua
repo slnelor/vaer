@@ -43,10 +43,25 @@ local function ensure_buffer_attached(bufnr)
       if state.suspend_dispatch then
         return
       end
+
+      local bs = state_mod.get_buf(state, buf)
       line_state.mark_changed_range(state, buf, firstline, new_lastline)
       line_state.persist(state, buf)
       ui.render_buffer(state, buf)
-      _ = lastline
+
+      if state.mode == "VAER" and state.opts.request.trigger == "newline" then
+        if new_lastline > lastline and not bs.dispatch_scheduled then
+          bs.dispatch_scheduled = true
+          vim.defer_fn(function()
+            if not vim.api.nvim_buf_is_valid(buf) then
+              return
+            end
+            local b2 = state_mod.get_buf(state, buf)
+            b2.dispatch_scheduled = false
+            dispatch_enter(buf)
+          end, 40)
+        end
+      end
     end,
     on_detach = function(_, buf)
       state.buffers[buf] = nil
@@ -170,7 +185,7 @@ dispatch_enter = function(bufnr)
 end
 
 local function map_enter()
-  if state.opts.request.trigger ~= "enter" and state.opts.request.trigger ~= "newline" then
+  if state.opts.request.trigger ~= "enter" then
     return
   end
   vim.keymap.set("i", "<CR>", function()

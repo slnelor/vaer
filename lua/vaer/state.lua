@@ -42,6 +42,8 @@ function M.get_buf(state, bufnr)
     status_by_line = {}, -- [line] = complete|progress|working
     working_ranges = {},
     last_changedtick = vim.api.nvim_buf_get_changedtick(bufnr),
+    last_line_count = vim.api.nvim_buf_line_count(bufnr),
+    dispatch_scheduled = false,
   }
   state.buffers[bufnr] = b
   return b

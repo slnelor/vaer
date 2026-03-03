@@ -41,6 +41,7 @@ end
 function M.mark_changed_range(state, bufnr, firstline_zero, new_lastline_zero)
   local b = require("vaer.state").get_buf(state, bufnr)
   b.last_changedtick = vim.api.nvim_buf_get_changedtick(bufnr)
+  b.last_line_count = vim.api.nvim_buf_line_count(bufnr)
 
   if state.mode ~= "VAER" then
     return
