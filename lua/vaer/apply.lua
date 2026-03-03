@@ -38,7 +38,8 @@ function M.apply_result(state, bufnr, ctx, result)
     return { status = "failed", diagnostics = { "invalid_buffer" } }
   end
 
-  if vim.api.nvim_buf_get_changedtick(bufnr) ~= ctx.changedtick_at_start then
+  local changedtick_mismatch = vim.api.nvim_buf_get_changedtick(bufnr) ~= ctx.changedtick_at_start
+  if changedtick_mismatch and not state.opts.request.allow_stale_apply then
     if state.opts.stale_strategy == "retry" then
       return { status = "retry", diagnostics = { "stale_changedtick" } }
     end
@@ -79,6 +80,9 @@ function M.apply_result(state, bufnr, ctx, result)
 
   line_state.mark_ranges_complete(state, bufnr, completed_ranges)
   line_state.persist(state, bufnr)
+  if changedtick_mismatch then
+    return { status = "success", diagnostics = { "stale_changedtick_applied" } }
+  end
   return { status = "success", diagnostics = {} }
 end
 

@@ -1,6 +1,6 @@
 import os
 
-DEFAULT_MODEL = os.getenv("VAER_MODEL", "openai/gpt-4.1-mini")
+DEFAULT_MODEL = os.getenv("VAER_MODEL", "openai/gpt-oss-120b")
 DEFAULT_PROVIDER = os.getenv("VAER_PROVIDER", "openai")
 DEFAULT_AGENT_MODE = os.getenv("VAER_AGENT_MODE", "code")
 SESSION_SCOPE = os.getenv("VAER_SESSION_SCOPE", "project")

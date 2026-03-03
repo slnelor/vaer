@@ -22,10 +22,11 @@ M.defaults = {
     command = nil,
     timeout_ms = 30000,
     trigger = "newline", -- newline | enter
+    allow_stale_apply = true,
   },
   opencode = {
     -- model can be provider/model format, eg: openai/gpt-4.1-mini
-    model = nil,
+    model = "openai/gpt-oss-120b",
     provider = nil,
     mode = "code",
     session_scope = "project", -- project | buffer
