@@ -45,12 +45,15 @@ local function ensure_buffer_attached(bufnr)
       end
 
       local bs = state_mod.get_buf(state, buf)
+      local prev_line_count = bs.last_line_count
       line_state.mark_changed_range(state, buf, firstline, new_lastline)
       line_state.persist(state, buf)
       ui.render_buffer(state, buf)
 
       if state.mode == "VAER" and state.opts.request.trigger == "newline" then
-        if new_lastline > lastline and not bs.dispatch_scheduled then
+        local current_line_count = vim.api.nvim_buf_line_count(buf)
+        local newline_created = (new_lastline > lastline) or (current_line_count > prev_line_count)
+        if newline_created and not bs.dispatch_scheduled then
           bs.dispatch_scheduled = true
           vim.defer_fn(function()
             if not vim.api.nvim_buf_is_valid(buf) then
@@ -263,6 +266,11 @@ function M.toggle_mode()
     ensure_buffer_attached(bufnr)
     line_state.mark_imports_progress(state, bufnr, ts.detect_import_lines(state, bufnr))
     line_state.persist(state, bufnr)
+  else
+    ui.stop_spinner(state)
+    for bufnr, _ in pairs(state.buffers) do
+      line_state.restore_working_to_progress(state, bufnr)
+    end
   end
   log.notify(state, "[MODE: " .. state.mode .. "]", vim.log.levels.INFO)
   ui.render_all(state)

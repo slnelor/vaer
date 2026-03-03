@@ -21,24 +21,28 @@ function M.render_buffer(state, bufnr)
   local b = require("vaer.state").get_buf(state, bufnr)
   vim.api.nvim_buf_clear_namespace(bufnr, state.ns, 0, -1)
 
-  for line, status in pairs(b.status_by_line) do
-    if status == line_state.PROGRESS or status == line_state.WORKING then
-      local hl = status == line_state.WORKING and "VaerWorking" or "VaerProgress"
-      vim.api.nvim_buf_add_highlight(bufnr, state.ns, hl, line - 1, 0, -1)
+  if state.mode == "VAER" then
+    for line, status in pairs(b.status_by_line) do
+      if status == line_state.PROGRESS or status == line_state.WORKING then
+        local hl = status == line_state.WORKING and "VaerWorking" or "VaerProgress"
+        vim.api.nvim_buf_add_highlight(bufnr, state.ns, hl, line - 1, 0, -1)
+      end
     end
   end
 
-  local current_frame = frame(state)
-  for _, r in ipairs(b.working_ranges) do
-    for line = r.start_line, r.end_line do
-      if b.status_by_line[line] == line_state.WORKING then
-        vim.api.nvim_buf_set_extmark(bufnr, state.ns, line - 1, 0, {
-          virt_text = { { current_frame, "VaerSpinner" } },
-          virt_text_pos = "overlay",
-          virt_text_win_col = 0,
-          hl_mode = "combine",
-          priority = 200,
-        })
+  if state.mode == "VAER" then
+    local current_frame = frame(state)
+    for _, r in ipairs(b.working_ranges) do
+      for line = r.start_line, r.end_line do
+        if b.status_by_line[line] == line_state.WORKING then
+          vim.api.nvim_buf_set_extmark(bufnr, state.ns, line - 1, 0, {
+            virt_text = { { current_frame, "VaerSpinner" } },
+            virt_text_pos = "overlay",
+            virt_text_win_col = 0,
+            hl_mode = "combine",
+            priority = 200,
+          })
+        end
       end
     end
   end
