@@ -35,11 +35,18 @@ end
 
 local function is_inside_progress_ranges(progress_ranges, edit)
   for _, r in ipairs(progress_ranges or {}) do
-    if edit.start_line >= r.start_line and edit.end_line <= r.end_line then
+    if edit.start_line <= r.end_line and edit.end_line >= r.start_line then
       return true
     end
   end
   return false
+end
+
+local function is_destructive_empty(edit)
+  if #edit.replacement_lines > 0 then
+    return false
+  end
+  return edit.end_line >= edit.start_line
 end
 
 function M.apply_result(state, bufnr, ctx, result)
@@ -65,6 +72,9 @@ function M.apply_result(state, bufnr, ctx, result)
       return { status = "failed", blocked_reason = "blocked_non_current_file_edit", diagnostics = { "cross_file_write_blocked" } }
     end
     if not is_inside_progress_ranges(ctx.progress_ranges, edit) then
+      goto continue
+    end
+    if is_destructive_empty(edit) then
       goto continue
     end
     local ok, msg = validate_no_complete_lines(state, bufnr, edit)

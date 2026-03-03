@@ -104,11 +104,13 @@ def build_prompt(payload: dict) -> str:
         "{\"edits\":[{\"target_file\":string,\"start_line\":number,\"end_line\":number,\"replacement_lines\":string[],\"reason\":string?}],\"diagnostics\":string[]}\n"
         "Rules:\n"
         "- You may reason about project context, but edits must target only target_file.\n"
-        "- Prefer edits inside progress_ranges.\n"
+        "- Edits MUST use absolute line numbers from the numbered text block.\n"
+        "- Keep edits strictly inside progress_ranges unless absolutely required.\n"
+        "- Avoid empty replacement_lines unless user explicitly asked to delete code.\n"
         "- Keep output concise and valid JSON.\n"
         f"target_file: {target_file}\n"
         f"progress_ranges: {json.dumps(progress_ranges)}\n"
-        "file_text:\n"
+        "file_text (format: `<absolute_line>| <code>`):\n"
         f"{file_text}\n"
     )
 

@@ -11,20 +11,78 @@ local M = {}
 local state = state_mod.new()
 local dispatch_enter
 
+local function merged_ranges(ranges)
+  if #ranges == 0 then
+    return {}
+  end
+  table.sort(ranges, function(a, b)
+    return a.start_line < b.start_line
+  end)
+  local out = {}
+  local cur = { start_line = ranges[1].start_line, end_line = ranges[1].end_line }
+  for i = 2, #ranges do
+    local r = ranges[i]
+    if r.start_line <= cur.end_line + 1 then
+      cur.end_line = math.max(cur.end_line, r.end_line)
+    else
+      table.insert(out, cur)
+      cur = { start_line = r.start_line, end_line = r.end_line }
+    end
+  end
+  table.insert(out, cur)
+  return out
+end
+
+local function build_payload_text(bufnr, progress_ranges)
+  local total = vim.api.nvim_buf_line_count(bufnr)
+  local radius = state.opts.request.context_radius or 24
+  local max_chars = state.opts.request.max_payload_chars or 16000
+  local windows = {}
+  for _, r in ipairs(progress_ranges) do
+    local s = math.max(1, r.start_line - radius)
+    local e = math.min(total, r.end_line + radius)
+    table.insert(windows, { start_line = s, end_line = e })
+  end
+  windows = merged_ranges(windows)
+
+  local chunks = {}
+  local count = 0
+  for _, w in ipairs(windows) do
+    local lines = vim.api.nvim_buf_get_lines(bufnr, w.start_line - 1, w.end_line, false)
+    for idx, line in ipairs(lines) do
+      local lnum = w.start_line + idx - 1
+      local row = string.format("%d| %s", lnum, line)
+      count = count + #row + 1
+      if count > max_chars then
+        table.insert(chunks, "...TRUNCATED...")
+        return table.concat(chunks, "\n")
+      end
+      table.insert(chunks, row)
+    end
+  end
+  return table.concat(chunks, "\n")
+end
+
 local function schedule_dispatch(bufnr, delay_ms)
   local b = state_mod.get_buf(state, bufnr)
-  if b.dispatch_scheduled then
-    return
-  end
+  b.dispatch_token = b.dispatch_token + 1
+  local token = b.dispatch_token
   b.dispatch_scheduled = true
   vim.defer_fn(function()
     if not vim.api.nvim_buf_is_valid(bufnr) then
       return
     end
     local b2 = state_mod.get_buf(state, bufnr)
+    if b2.dispatch_token ~= token then
+      return
+    end
     b2.dispatch_scheduled = false
+    if b2.request_in_flight then
+      b2.pending_dispatch = true
+      return
+    end
     dispatch_enter(bufnr)
-  end, delay_ms or 40)
+  end, delay_ms or state.opts.request.debounce_ms or 300)
 end
 
 local function detect_plugin_root()
@@ -76,14 +134,13 @@ local function ensure_buffer_attached(bufnr)
       local bs = state_mod.get_buf(state, buf)
       local prev_line_count = bs.last_line_count
       line_state.mark_changed_range(state, buf, firstline, new_lastline)
-      schedule_persist(buf)
       ui.render_buffer(state, buf)
 
       if state.mode == "VAER" and state.opts.request.trigger == "newline" then
         local current_line_count = vim.api.nvim_buf_line_count(buf)
         local newline_created = (new_lastline > lastline) or (current_line_count > prev_line_count)
         if newline_created then
-          schedule_dispatch(buf, 40)
+          schedule_dispatch(buf)
         end
       end
     end,
@@ -141,14 +198,10 @@ dispatch_enter = function(bufnr)
     return
   end
 
-  local file_text = table.concat(vim.api.nvim_buf_get_lines(bufnr, 0, -1, false), "\n")
+  local file_text = build_payload_text(bufnr, ctx.progress_ranges)
   if vim.trim(file_text) == "" then
     return
   end
-
-  line_state.mark_working_ranges(state, bufnr, ctx.progress_ranges)
-  ui.render_buffer(state, bufnr)
-  ui.start_spinner(state)
 
   local payload = {
     target_file = ctx.target_file,
@@ -173,6 +226,10 @@ dispatch_enter = function(bufnr)
   request.submit(state, payload, function(result)
     local b2 = state_mod.get_buf(state, bufnr)
     b2.request_in_flight = false
+    if b2.pending_dispatch then
+      b2.pending_dispatch = false
+      schedule_dispatch(bufnr, 120)
+    end
 
     if result.status ~= "success" then
       line_state.restore_working_to_progress(state, bufnr)
@@ -225,7 +282,11 @@ dispatch_enter = function(bufnr)
 
     schedule_persist(bufnr)
     ui.render_buffer(state, bufnr)
-    log.notify(state, "applied vaer edits", vim.log.levels.INFO)
+    local suffix = ""
+    if apply_result.diagnostics and #apply_result.diagnostics > 0 then
+      suffix = " (" .. table.concat(apply_result.diagnostics, ",") .. ")"
+    end
+    log.notify(state, "applied vaer edits" .. suffix, vim.log.levels.INFO)
   end, {
     key = "buf:" .. tostring(bufnr),
     supersede = true,

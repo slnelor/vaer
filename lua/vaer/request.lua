@@ -1,4 +1,3 @@
-local log = require("vaer.log")
 local ui = require("vaer.ui")
 
 local M = {}
@@ -135,7 +134,6 @@ function M.submit(state, payload, on_done, opts)
       state.request.active_by_key[key] = request_id
     end
     ui.render_task_window(state)
-    log.notify(state, "started request " .. request_id, vim.log.levels.DEBUG)
   end
 
   if state.request.in_flight_count < state.opts.max_parallel_requests then

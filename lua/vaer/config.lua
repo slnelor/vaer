@@ -23,6 +23,9 @@ M.defaults = {
     timeout_ms = 30000,
     trigger = "newline", -- newline | enter
     allow_stale_apply = true,
+    debounce_ms = 300,
+    context_radius = 24,
+    max_payload_chars = 16000,
   },
   opencode = {
     -- model can be provider/model format, eg: openai/gpt-4.1-mini
