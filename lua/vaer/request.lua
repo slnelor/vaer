@@ -2,20 +2,55 @@ local ui = require("vaer.ui")
 
 local M = {}
 
+local function build_command(state, cmd)
+  local nice_value = state.opts.request.process_priority_nice
+  if type(nice_value) == "number" and vim.fn.executable("nice") == 1 then
+    local full = { "nice", "-n", tostring(math.floor(nice_value)) }
+    for _, part in ipairs(cmd) do
+      table.insert(full, part)
+    end
+    return full
+  end
+  return cmd
+end
+
 local function next_id(state)
   state.request.seq = state.request.seq + 1
   return string.format("vaer-%d", state.request.seq)
 end
 
-local function start_next(state)
-  if state.request.in_flight_count >= state.opts.max_parallel_requests then
+local function schedule_launch(state, delay_ms)
+  if state.request.launch_scheduled then
     return
   end
-  local item = table.remove(state.request.queue, 1)
-  if not item then
-    return
+
+  state.request.launch_scheduled = true
+  vim.defer_fn(function()
+    state.request.launch_scheduled = false
+    if state.request.in_flight_count >= state.opts.max_parallel_requests then
+      return
+    end
+
+    local item = table.remove(state.request.queue, 1)
+    if not item then
+      return
+    end
+
+    item.start()
+
+    if state.request.in_flight_count < state.opts.max_parallel_requests and #state.request.queue > 0 then
+      schedule_launch(state, state.opts.request.launch_stagger_ms or 120)
+    end
+  end, delay_ms or 0)
+end
+
+local function purge_queued_for_key(state, key)
+  for i = #state.request.queue, 1, -1 do
+    local q = state.request.queue[i]
+    if q and q.key == key then
+      table.remove(state.request.queue, i)
+    end
   end
-  item.start()
 end
 
 local function schedule_pending_for_key(state, key)
@@ -38,6 +73,7 @@ function M.cancel_all(state)
   state.request.pending_by_key = {}
   state.request.queue = {}
   state.request.in_flight_count = 0
+  state.request.launch_scheduled = false
   ui.render_task_window(state)
 end
 
@@ -46,6 +82,10 @@ function M.submit(state, payload, on_done, opts)
   local key = opts.key
   local supersede = opts.supersede == true
   local cancel_active = opts.cancel_active_on_supersede == true
+
+  if supersede and type(key) == "string" then
+    purge_queued_for_key(state, key)
+  end
 
   if supersede and type(key) == "string" and state.request.active_by_key[key] then
     state.request.pending_by_key[key] = {
@@ -79,12 +119,13 @@ function M.submit(state, payload, on_done, opts)
         diagnostics = { "request.command is not configured" },
         edits = {},
       })
-      start_next(state)
+      schedule_launch(state, state.opts.request.launch_stagger_ms or 120)
       return
     end
 
+    local launch_cmd = build_command(state, cmd)
     local encoded = vim.json.encode(payload)
-    local handle = vim.system(cmd, {
+    local handle = vim.system(launch_cmd, {
       cwd = state.project_root,
       text = true,
       stdin = encoded,
@@ -113,7 +154,7 @@ function M.submit(state, payload, on_done, opts)
           if type(active_key) == "string" then
             schedule_pending_for_key(state, active_key)
           end
-          start_next(state)
+          schedule_launch(state, state.opts.request.launch_stagger_ms or 120)
           return
         end
 
@@ -124,7 +165,7 @@ function M.submit(state, payload, on_done, opts)
           if type(active_key) == "string" then
             schedule_pending_for_key(state, active_key)
           end
-          start_next(state)
+          schedule_launch(state, state.opts.request.launch_stagger_ms or 120)
           return
         end
 
@@ -135,7 +176,7 @@ function M.submit(state, payload, on_done, opts)
         if type(active_key) == "string" then
           schedule_pending_for_key(state, active_key)
         end
-        start_next(state)
+        schedule_launch(state, state.opts.request.launch_stagger_ms or 120)
       end)
     end)
 
@@ -146,12 +187,9 @@ function M.submit(state, payload, on_done, opts)
     ui.render_task_window(state)
   end
 
-  if state.request.in_flight_count < state.opts.max_parallel_requests then
-    run()
-  else
-    table.insert(state.request.queue, { start = run })
-    ui.render_task_window(state)
-  end
+  table.insert(state.request.queue, { start = run, key = key })
+  ui.render_task_window(state)
+  schedule_launch(state, 0)
 
   return request_id
 end

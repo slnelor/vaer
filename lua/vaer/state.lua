@@ -29,6 +29,7 @@ function M.new()
       queue = {}, -- pending function entries
       in_flight_count = 0,
       seq = 0,
+      launch_scheduled = false,
     },
   }
 end
