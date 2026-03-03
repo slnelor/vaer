@@ -1,7 +1,6 @@
 local config = require("vaer.config")
 local state_mod = require("vaer.state")
 local line_state = require("vaer.line_state")
-local ts = require("vaer.treesitter")
 local ui = require("vaer.ui")
 local request = require("vaer.request")
 local apply = require("vaer.apply")
@@ -27,6 +26,21 @@ local function merge_opts(opts)
   return vim.tbl_deep_extend("force", vim.deepcopy(config.defaults), opts or {})
 end
 
+local function schedule_persist(bufnr)
+  local b = state_mod.get_buf(state, bufnr)
+  if b.persist_scheduled then
+    return
+  end
+  b.persist_scheduled = true
+  vim.defer_fn(function()
+    if vim.api.nvim_buf_is_valid(bufnr) then
+      line_state.persist(state, bufnr)
+      local b2 = state_mod.get_buf(state, bufnr)
+      b2.persist_scheduled = false
+    end
+  end, 250)
+end
+
 local function ensure_buffer_attached(bufnr)
   local b = state_mod.get_buf(state, bufnr)
   if b.attached then
@@ -34,7 +48,6 @@ local function ensure_buffer_attached(bufnr)
   end
 
   line_state.initialize_for_buffer(state, bufnr)
-  line_state.mark_imports_progress(state, bufnr, ts.detect_import_lines(state, bufnr))
   line_state.persist(state, bufnr)
   ui.render_buffer(state, bufnr)
 
@@ -47,7 +60,7 @@ local function ensure_buffer_attached(bufnr)
       local bs = state_mod.get_buf(state, buf)
       local prev_line_count = bs.last_line_count
       line_state.mark_changed_range(state, buf, firstline, new_lastline)
-      line_state.persist(state, buf)
+      schedule_persist(buf)
       ui.render_buffer(state, buf)
 
       if state.mode == "VAER" and state.opts.request.trigger == "newline" then
@@ -107,6 +120,11 @@ dispatch_enter = function(bufnr)
     return
   end
 
+  local bstate = state_mod.get_buf(state, bufnr)
+  if bstate.request_in_flight then
+    return
+  end
+
   local ctx = current_buffer_context(bufnr)
   if #ctx.progress_ranges == 0 then
     return
@@ -143,10 +161,14 @@ dispatch_enter = function(bufnr)
     },
   }
 
+  bstate.request_in_flight = true
   request.submit(state, payload, function(result)
+    local b2 = state_mod.get_buf(state, bufnr)
+    b2.request_in_flight = false
+
     if result.status ~= "success" then
       line_state.restore_working_to_progress(state, bufnr)
-      line_state.persist(state, bufnr)
+      schedule_persist(bufnr)
       ui.render_buffer(state, bufnr)
       log.notify(state, "request failed: " .. table.concat(result.diagnostics or {}, " | "), vim.log.levels.WARN)
       return
@@ -154,7 +176,7 @@ dispatch_enter = function(bufnr)
 
     if not result.edits or #result.edits == 0 then
       line_state.restore_working_to_progress(state, bufnr)
-      line_state.persist(state, bufnr)
+      schedule_persist(bufnr)
       ui.render_buffer(state, bufnr)
       local details = table.concat(result.diagnostics or {}, " | ")
       if details == "" then
@@ -176,12 +198,13 @@ dispatch_enter = function(bufnr)
 
     if apply_result.status ~= "success" then
       line_state.restore_working_to_progress(state, bufnr)
-      line_state.persist(state, bufnr)
+      schedule_persist(bufnr)
       ui.render_buffer(state, bufnr)
       log.notify(state, "apply blocked: " .. table.concat(apply_result.diagnostics or {}, " | "), vim.log.levels.WARN)
       return
     end
 
+    schedule_persist(bufnr)
     ui.render_buffer(state, bufnr)
     log.notify(state, "applied vaer edits", vim.log.levels.INFO)
   end)
@@ -264,8 +287,7 @@ function M.toggle_mode()
   if state.mode == "VAER" then
     local bufnr = vim.api.nvim_get_current_buf()
     ensure_buffer_attached(bufnr)
-    line_state.mark_imports_progress(state, bufnr, ts.detect_import_lines(state, bufnr))
-    line_state.persist(state, bufnr)
+    schedule_persist(bufnr)
   else
     ui.stop_spinner(state)
     for bufnr, _ in pairs(state.buffers) do

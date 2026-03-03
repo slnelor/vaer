@@ -44,6 +44,8 @@ function M.get_buf(state, bufnr)
     last_changedtick = vim.api.nvim_buf_get_changedtick(bufnr),
     last_line_count = vim.api.nvim_buf_line_count(bufnr),
     dispatch_scheduled = false,
+    request_in_flight = false,
+    persist_scheduled = false,
   }
   state.buffers[bufnr] = b
   return b

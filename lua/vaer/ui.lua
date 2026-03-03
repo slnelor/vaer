@@ -30,7 +30,7 @@ function M.render_buffer(state, bufnr)
     end
   end
 
-  if state.mode == "VAER" then
+  if state.mode == "VAER" and state.opts.ui.enable_spinner then
     local current_frame = frame(state)
     for _, r in ipairs(b.working_ranges) do
       for line = r.start_line, r.end_line do
@@ -67,6 +67,9 @@ local function has_working(state)
 end
 
 function M.start_spinner(state)
+  if not state.opts.ui.enable_spinner then
+    return
+  end
   if state.spinner_timer then
     return
   end

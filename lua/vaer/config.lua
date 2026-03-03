@@ -34,6 +34,9 @@ M.defaults = {
     enable = true,
     use_fallback_heuristics = true,
   },
+  ui = {
+    enable_spinner = false,
+  },
   notify = true,
 }
 
