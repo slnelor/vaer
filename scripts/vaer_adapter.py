@@ -105,9 +105,13 @@ def build_prompt(payload: dict) -> str:
         "Rules:\n"
         "- You may reason about project context, but edits must target only target_file.\n"
         "- Edits MUST use absolute line numbers from the numbered text block.\n"
-        "- Keep edits strictly inside progress_ranges unless absolutely required.\n"
+        "- Keep edits strictly inside progress_ranges.\n"
+        "- Never modify import lines unless an import line is explicitly in progress_ranges.\n"
+        "- Return at most 3 edits and keep each edit focused and minimal.\n"
+        "- Prefer rewriting invalid/pseudo code into valid code on the same line(s).\n"
+        "- Preserve user intent; do not perform unrelated refactors.\n"
+        "- If uncertain, return edits=[] and explain in diagnostics.\n"
         "- Do NOT delete code. replacement_lines must include at least one non-empty line.\n"
-        "- Prefer rewriting pseudo/invalid code into valid code instead of removing lines.\n"
         "- Keep output concise and valid JSON.\n"
         f"target_file: {target_file}\n"
         f"progress_ranges: {json.dumps(progress_ranges)}\n"
@@ -161,6 +165,11 @@ def call_opencode(payload: dict) -> dict:
 
     cwd = payload.get("cwd") or os.getcwd()
     target_file = payload.get("target_file", "")
+    timeout_ms = payload.get("request_timeout_ms")
+    if isinstance(timeout_ms, (int, float)):
+        run_timeout_sec = max(20, min(180, int(timeout_ms / 1000) - 2))
+    else:
+        run_timeout_sec = 85
 
     session_id = load_cached_session_id(cwd, session_scope, target_file)
     prompt = build_prompt(payload)
@@ -185,7 +194,7 @@ def call_opencode(payload: dict) -> dict:
             cmd,
             text=True,
             capture_output=True,
-            timeout=45,
+            timeout=run_timeout_sec,
             check=False,
         )
 
@@ -229,14 +238,14 @@ def call_opencode(payload: dict) -> dict:
     except FileNotFoundError:
         return {"edits": [], "diagnostics": ["opencode CLI not found in PATH"]}
     except subprocess.TimeoutExpired:
-        return {"edits": [], "diagnostics": ["opencode run timeout"]}
+        return {"edits": [], "diagnostics": [f"opencode run timeout ({run_timeout_sec}s)"]}
 
     if event_errors and any("Model not found:" in e for e in event_errors):
         clear_cached_session_id(cwd, session_scope, target_file)
         try:
             proc, text_parts, event_errors, new_session_id = run_once(False, False)
         except subprocess.TimeoutExpired:
-            return {"edits": [], "diagnostics": ["opencode run timeout"]}
+            return {"edits": [], "diagnostics": [f"opencode run timeout ({run_timeout_sec}s)"]}
 
     if proc.returncode != 0 and not event_errors:
         return {

@@ -50,6 +50,8 @@ function M.get_buf(state, bufnr)
     dispatch_token = 0,
     pending_dispatch = false,
     request_in_flight = false,
+    request_timeout_ms = nil,
+    timeout_failures = 0,
     persist_scheduled = false,
     render_scheduled = false,
   }

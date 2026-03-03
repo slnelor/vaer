@@ -20,7 +20,7 @@ M.defaults = {
     -- JSON in: { target_file, changedtick, progress_ranges, file_text, cwd, permissions }
     -- JSON out: { edits = [{ target_file, start_line, end_line, replacement_lines, reason? }] }
     command = nil,
-    timeout_ms = 30000,
+    timeout_ms = 90000,
     trigger = "newline", -- newline | enter
     allow_stale_apply = true,
     debounce_ms = 300,

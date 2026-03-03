@@ -82,6 +82,7 @@ function M.submit(state, payload, on_done, opts)
   local key = opts.key
   local supersede = opts.supersede == true
   local cancel_active = opts.cancel_active_on_supersede == true
+  local timeout_ms = opts.timeout_ms or state.opts.request.timeout_ms
 
   if supersede and type(key) == "string" then
     purge_queued_for_key(state, key)
@@ -98,6 +99,7 @@ function M.submit(state, payload, on_done, opts)
       local active_request_id = state.request.active_by_key[key]
       local active = active_request_id and state.request.active[active_request_id] or nil
       if active and active.handle and active.handle.kill then
+        active.cancel_reason = "superseded"
         pcall(active.handle.kill, active.handle, 15)
       end
     end
@@ -129,11 +131,12 @@ function M.submit(state, payload, on_done, opts)
       cwd = state.project_root,
       text = true,
       stdin = encoded,
-      timeout = state.opts.request.timeout_ms,
+      timeout = timeout_ms,
     }, function(obj)
       vim.schedule(function()
         local active = state.request.active[request_id]
         local active_key = active and active.key or nil
+        local cancel_reason = active and active.cancel_reason or nil
         state.request.active[request_id] = nil
         if type(active_key) == "string" then
           state.request.active_by_key[active_key] = nil
@@ -148,8 +151,30 @@ function M.submit(state, payload, on_done, opts)
           edits = {},
         }
 
+        if cancel_reason then
+          result.status = "cancelled"
+          result.diagnostics = { "cancelled:" .. cancel_reason }
+          on_done(result)
+          if type(active_key) == "string" then
+            schedule_pending_for_key(state, active_key)
+          end
+          schedule_launch(state, state.opts.request.launch_stagger_ms or 120)
+          return
+        end
+
         if obj.code ~= 0 then
-          result.diagnostics = { "adapter_exit_code=" .. tostring(obj.code), obj.stderr or "" }
+          if obj.code == 124 then
+            result.status = "timeout"
+            result.diagnostics = { "timeout_ms=" .. tostring(timeout_ms) }
+          else
+            result.diagnostics = { "adapter_exit_code=" .. tostring(obj.code), obj.stderr or "" }
+          end
+
+          if obj.signal and obj.signal ~= 0 then
+            result.status = "cancelled"
+            result.diagnostics = { "signal=" .. tostring(obj.signal) }
+          end
+
           on_done(result)
           if type(active_key) == "string" then
             schedule_pending_for_key(state, active_key)

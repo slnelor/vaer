@@ -238,6 +238,10 @@ dispatch_enter = function(bufnr)
     return
   end
 
+  if not bstate.request_timeout_ms then
+    bstate.request_timeout_ms = state.opts.request.timeout_ms
+  end
+
   local ctx = current_buffer_context(bufnr)
   if #ctx.progress_ranges == 0 then
     return
@@ -260,6 +264,7 @@ dispatch_enter = function(bufnr)
   local payload = {
     target_file = ctx.target_file,
     changedtick = ctx.changedtick_at_start,
+    request_timeout_ms = bstate.request_timeout_ms,
     progress_ranges = ctx.progress_ranges,
     file_text = file_text,
     cwd = state.project_root,
@@ -285,6 +290,19 @@ dispatch_enter = function(bufnr)
       schedule_dispatch(bufnr, 120)
     end
 
+    if result.status == "cancelled" then
+      return
+    end
+
+    if result.status == "timeout" then
+      local base_timeout = state.opts.request.timeout_ms
+      b2.timeout_failures = math.min((b2.timeout_failures or 0) + 1, 3)
+      b2.request_timeout_ms = math.min(base_timeout * (2 ^ b2.timeout_failures), 180000)
+      schedule_dispatch(bufnr, 400)
+      log.notify(state, "request timeout; retrying with timeout_ms=" .. tostring(b2.request_timeout_ms), vim.log.levels.WARN)
+      return
+    end
+
     if result.status ~= "success" then
       line_state.restore_working_to_progress(state, bufnr)
       schedule_persist(bufnr)
@@ -292,6 +310,9 @@ dispatch_enter = function(bufnr)
       log.notify(state, "request failed: " .. table.concat(result.diagnostics or {}, " | "), vim.log.levels.WARN)
       return
     end
+
+    b2.timeout_failures = 0
+    b2.request_timeout_ms = state.opts.request.timeout_ms
 
     if not result.edits or #result.edits == 0 then
       line_state.restore_working_to_progress(state, bufnr)
@@ -345,6 +366,7 @@ dispatch_enter = function(bufnr)
     key = "buf:" .. tostring(bufnr),
     supersede = true,
     cancel_active_on_supersede = state.opts.request.cancel_active_on_supersede,
+    timeout_ms = bstate.request_timeout_ms,
   })
 end
 
