@@ -46,6 +46,15 @@ curl -fsSL https://opencode.ai/install | bash
 Configure OpenCode/provider auth via `opencode` CLI.
 If you set `opencode.model`, make sure it exists for your provider (or leave unset to use your `opencode` default model).
 
+## Stability defaults
+
+For low-latency and fewer freezes under heavy typing:
+
+- Keep `max_parallel_requests = 1`
+- Use `request.trigger = "newline"`
+- Use `request.debounce_ms = 300` (or higher)
+- Keep `request.cancel_active_on_supersede = true`
+
 ## Adapter protocol
 
 Plugin sends JSON via stdin:
