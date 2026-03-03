@@ -113,6 +113,10 @@ local function close_task_window(state)
 end
 
 function M.render_task_window(state)
+  if not state.opts.ui.show_task_window then
+    close_task_window(state)
+    return
+  end
   local total = state.request.in_flight_count + #state.request.queue
   if total <= 1 then
     close_task_window(state)

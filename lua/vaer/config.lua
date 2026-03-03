@@ -4,7 +4,7 @@ M.defaults = {
   mode = "HAND",
   spinner_frames = { "[v]", "[a]", "[e]", "[r]" },
   spinner_interval_ms = 120,
-  max_parallel_requests = 4,
+  max_parallel_requests = 1,
   stale_strategy = "retry", -- skip | retry
   enable_default_keymaps = true,
   keymaps = {
@@ -37,6 +37,7 @@ M.defaults = {
   },
   ui = {
     enable_spinner = false,
+    show_task_window = false,
   },
   notify = true,
 }

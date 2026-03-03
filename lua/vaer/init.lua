@@ -226,7 +226,10 @@ dispatch_enter = function(bufnr)
     schedule_persist(bufnr)
     ui.render_buffer(state, bufnr)
     log.notify(state, "applied vaer edits", vim.log.levels.INFO)
-  end)
+  end, {
+    key = "buf:" .. tostring(bufnr),
+    supersede = true,
+  })
 end
 
 local function map_enter()

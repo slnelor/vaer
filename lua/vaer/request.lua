@@ -19,6 +19,15 @@ local function start_next(state)
   item.start()
 end
 
+local function schedule_pending_for_key(state, key)
+  local pending = state.request.pending_by_key[key]
+  if not pending then
+    return
+  end
+  state.request.pending_by_key[key] = nil
+  M.submit(state, pending.payload, pending.on_done, pending.opts)
+end
+
 function M.cancel_all(state)
   for _, active in pairs(state.request.active) do
     if active.handle and active.handle.kill then
@@ -26,12 +35,27 @@ function M.cancel_all(state)
     end
   end
   state.request.active = {}
+  state.request.active_by_key = {}
+  state.request.pending_by_key = {}
   state.request.queue = {}
   state.request.in_flight_count = 0
   ui.render_task_window(state)
 end
 
-function M.submit(state, payload, on_done)
+function M.submit(state, payload, on_done, opts)
+  opts = opts or {}
+  local key = opts.key
+  local supersede = opts.supersede == true
+
+  if supersede and type(key) == "string" and state.request.active_by_key[key] then
+    state.request.pending_by_key[key] = {
+      payload = payload,
+      on_done = on_done,
+      opts = opts,
+    }
+    return state.request.active_by_key[key]
+  end
+
   local request_id = next_id(state)
 
   local function run()
@@ -58,7 +82,12 @@ function M.submit(state, payload, on_done)
       timeout = state.opts.request.timeout_ms,
     }, function(obj)
       vim.schedule(function()
+        local active = state.request.active[request_id]
+        local active_key = active and active.key or nil
         state.request.active[request_id] = nil
+        if type(active_key) == "string" then
+          state.request.active_by_key[active_key] = nil
+        end
         state.request.in_flight_count = math.max(state.request.in_flight_count - 1, 0)
         ui.render_task_window(state)
 
@@ -72,6 +101,9 @@ function M.submit(state, payload, on_done)
         if obj.code ~= 0 then
           result.diagnostics = { "adapter_exit_code=" .. tostring(obj.code), obj.stderr or "" }
           on_done(result)
+          if type(active_key) == "string" then
+            schedule_pending_for_key(state, active_key)
+          end
           start_next(state)
           return
         end
@@ -80,6 +112,9 @@ function M.submit(state, payload, on_done)
         if not ok or type(decoded) ~= "table" then
           result.diagnostics = { "invalid_adapter_json" }
           on_done(result)
+          if type(active_key) == "string" then
+            schedule_pending_for_key(state, active_key)
+          end
           start_next(state)
           return
         end
@@ -88,11 +123,17 @@ function M.submit(state, payload, on_done)
         result.edits = decoded.edits or {}
         result.diagnostics = decoded.diagnostics or {}
         on_done(result)
+        if type(active_key) == "string" then
+          schedule_pending_for_key(state, active_key)
+        end
         start_next(state)
       end)
     end)
 
-    state.request.active[request_id] = { handle = handle }
+    state.request.active[request_id] = { handle = handle, key = key }
+    if type(key) == "string" then
+      state.request.active_by_key[key] = request_id
+    end
     ui.render_task_window(state)
     log.notify(state, "started request " .. request_id, vim.log.levels.DEBUG)
   end

@@ -24,6 +24,8 @@ function M.new()
     initialized = false,
     request = {
       active = {}, -- id -> handle
+      active_by_key = {}, -- key -> request_id
+      pending_by_key = {}, -- key -> {payload,on_done,opts}
       queue = {}, -- pending function entries
       in_flight_count = 0,
       seq = 0,

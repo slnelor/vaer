@@ -33,6 +33,15 @@ local function validate_no_complete_lines(state, bufnr, edit)
   return true
 end
 
+local function is_inside_progress_ranges(progress_ranges, edit)
+  for _, r in ipairs(progress_ranges or {}) do
+    if edit.start_line >= r.start_line and edit.end_line <= r.end_line then
+      return true
+    end
+  end
+  return false
+end
+
 function M.apply_result(state, bufnr, ctx, result)
   if not vim.api.nvim_buf_is_valid(bufnr) then
     return { status = "failed", diagnostics = { "invalid_buffer" } }
@@ -55,11 +64,19 @@ function M.apply_result(state, bufnr, ctx, result)
     if edit.target_file ~= ctx.target_file then
       return { status = "failed", blocked_reason = "blocked_non_current_file_edit", diagnostics = { "cross_file_write_blocked" } }
     end
+    if not is_inside_progress_ranges(ctx.progress_ranges, edit) then
+      goto continue
+    end
     local ok, msg = validate_no_complete_lines(state, bufnr, edit)
     if not ok then
-      return { status = "failed", blocked_reason = "attempt_edit_complete_line", diagnostics = { msg } }
+      goto continue
     end
     table.insert(edits, edit)
+    ::continue::
+  end
+
+  if #edits == 0 then
+    return { status = "failed", diagnostics = { "no_applicable_edits" } }
   end
 
   table.sort(edits, function(a, b)
