@@ -55,6 +55,8 @@ M.defaults = {
   },
   inception = {
     model = "mercury-2",
+    -- Optional explicit key, supports {file:~/.secrets/inception.key}
+    api_key = nil,
     stream = true,
     diffusing = false,
     reasoning_effort = "instant", -- instant | low | medium | high

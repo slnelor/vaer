@@ -45,6 +45,27 @@ def read_payload() -> dict:
         return {}
 
 
+def resolve_config_value(value: object) -> str | None:
+    if not isinstance(value, str):
+        return None
+
+    text = value.strip()
+    if not text:
+        return None
+
+    if text.startswith("{file:") and text.endswith("}"):
+        path_text = text[6:-1].strip()
+        if not path_text:
+            return None
+        path = Path(path_text).expanduser()
+        try:
+            return path.read_text(encoding="utf-8").strip() or None
+        except Exception:
+            return None
+
+    return text
+
+
 def split_model(model: str) -> tuple[str | None, str | None]:
     if not model:
         return None, None
@@ -234,7 +255,7 @@ def resolve_provider(payload: dict) -> str:
 
 def call_inception(payload: dict) -> dict:
     cfg = payload.get("inception", {}) if isinstance(payload.get("inception"), dict) else {}
-    api_key = os.getenv("INCEPTION_API_KEY")
+    api_key = resolve_config_value(cfg.get("api_key")) or os.getenv("INCEPTION_API_KEY")
     if not api_key:
         return {"edits": [], "diagnostics": ["missing INCEPTION_API_KEY"]}
 

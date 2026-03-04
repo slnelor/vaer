@@ -23,7 +23,7 @@ Neovim plugin prototype for HAND/VAER inline coding flow.
 vim.opt.rtp:append("/home/mikhail/ForPython/vaer/proto/vaer")
 require("vaer").setup({
   provider = {
-    name = "opencode", -- or "inception"
+    name = "inception", -- or "opencode"
   },
   opencode = {
     -- model = "openai/gpt-5.3-codex", -- default in plugin, override if needed
@@ -33,6 +33,7 @@ require("vaer").setup({
   },
   inception = {
     model = "mercury-2",
+    api_key = "{file:~/.secrets/inception.key}", -- optional, falls back to INCEPTION_API_KEY
     stream = true,
     diffusing = false,
     reasoning_effort = "instant",
@@ -61,6 +62,14 @@ For Inception provider, set:
 
 ```bash
 export INCEPTION_API_KEY="your_api_key_here"
+```
+
+Or configure a file-based key:
+
+```lua
+inception = {
+  api_key = "{file:~/.secrets/inception.key}",
+}
 ```
 
 ## Stability defaults

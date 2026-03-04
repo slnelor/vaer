@@ -284,6 +284,7 @@ dispatch_enter = function(bufnr)
     },
     inception = {
       model = state.opts.inception.model,
+      api_key = state.opts.inception.api_key,
       stream = state.opts.inception.stream,
       diffusing = state.opts.inception.diffusing,
       reasoning_effort = state.opts.inception.reasoning_effort,
