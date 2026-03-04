@@ -279,6 +279,17 @@ dispatch_enter = function(bufnr)
       mode = state.opts.opencode.mode,
       session_scope = state.opts.opencode.session_scope,
     },
+    provider = {
+      name = state.opts.provider.name,
+    },
+    inception = {
+      model = state.opts.inception.model,
+      stream = state.opts.inception.stream,
+      diffusing = state.opts.inception.diffusing,
+      reasoning_effort = state.opts.inception.reasoning_effort,
+      max_tokens = state.opts.inception.max_tokens,
+      temperature = state.opts.inception.temperature,
+    },
   }
 
   bstate.request_in_flight = true

@@ -29,6 +29,8 @@ import re
 import shutil
 import subprocess
 import sys
+import urllib.error
+import urllib.request
 from pathlib import Path
 
 
@@ -107,7 +109,6 @@ def build_prompt(payload: dict) -> str:
         "- Edits MUST use absolute line numbers from the numbered text block.\n"
         "- Keep edits strictly inside progress_ranges.\n"
         "- Never modify import lines unless an import line is explicitly in progress_ranges.\n"
-        "- Return at most 3 edits and keep each edit focused and minimal.\n"
         "- Prefer rewriting invalid/pseudo code into valid code on the same line(s).\n"
         "- Preserve user intent; do not perform unrelated refactors.\n"
         "- If uncertain, return edits=[] and explain in diagnostics.\n"
@@ -151,6 +152,193 @@ def extract_json_object(text: str) -> dict | None:
     return None
 
 
+def run_timeout_seconds(payload: dict) -> int:
+    timeout_ms = payload.get("request_timeout_ms")
+    if isinstance(timeout_ms, (int, float)):
+        return max(20, min(180, int(timeout_ms / 1000) - 2))
+    return 85
+
+
+def parse_structured_payload(parsed: dict, fallback_diagnostics: list[str] | None = None) -> dict:
+    edits = parsed.get("edits", [])
+    diagnostics = parsed.get("diagnostics", [])
+    if not isinstance(edits, list):
+        edits = []
+    if not isinstance(diagnostics, list):
+        diagnostics = []
+
+    if not edits and fallback_diagnostics:
+        diagnostics.extend(fallback_diagnostics)
+
+    return {
+        "edits": edits,
+        "diagnostics": diagnostics,
+    }
+
+
+def response_schema() -> dict:
+    return {
+        "name": "VaerEdits",
+        "strict": True,
+        "schema": {
+            "type": "object",
+            "properties": {
+                "edits": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "target_file": {"type": "string"},
+                            "start_line": {"type": "integer", "minimum": 1},
+                            "end_line": {"type": "integer", "minimum": 1},
+                            "replacement_lines": {
+                                "type": "array",
+                                "minItems": 1,
+                                "items": {"type": "string"},
+                            },
+                            "reason": {"type": "string"},
+                        },
+                        "required": [
+                            "target_file",
+                            "start_line",
+                            "end_line",
+                            "replacement_lines",
+                        ],
+                        "additionalProperties": False,
+                    },
+                },
+                "diagnostics": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                },
+            },
+            "required": ["edits", "diagnostics"],
+            "additionalProperties": False,
+        },
+    }
+
+
+def resolve_provider(payload: dict) -> str:
+    cfg = payload.get("provider")
+    if isinstance(cfg, dict):
+        name = cfg.get("name")
+        if isinstance(name, str) and name:
+            return name.lower()
+
+    env_name = os.getenv("VAER_PROVIDER")
+    if isinstance(env_name, str) and env_name:
+        return env_name.lower()
+
+    return "opencode"
+
+
+def call_inception(payload: dict) -> dict:
+    cfg = payload.get("inception", {}) if isinstance(payload.get("inception"), dict) else {}
+    api_key = os.getenv("INCEPTION_API_KEY")
+    if not api_key:
+        return {"edits": [], "diagnostics": ["missing INCEPTION_API_KEY"]}
+
+    model = cfg.get("model") if isinstance(cfg.get("model"), str) and cfg.get("model") else "mercury-2"
+    stream = bool(cfg.get("stream", True))
+    diffusing = bool(cfg.get("diffusing", False))
+    reasoning_effort = cfg.get("reasoning_effort") if isinstance(cfg.get("reasoning_effort"), str) else "instant"
+    max_tokens = cfg.get("max_tokens") if isinstance(cfg.get("max_tokens"), int) else 4096
+    temperature = cfg.get("temperature") if isinstance(cfg.get("temperature"), (int, float)) else 0.0
+
+    prompt = build_prompt(payload)
+    body = {
+        "model": model,
+        "messages": [{"role": "user", "content": prompt}],
+        "response_format": {
+            "type": "json_schema",
+            "json_schema": response_schema(),
+        },
+        "reasoning_effort": reasoning_effort,
+        "max_tokens": max_tokens,
+        "temperature": temperature,
+        "stream": stream,
+    }
+    if stream and diffusing:
+        body["diffusing"] = True
+
+    data = json.dumps(body).encode("utf-8")
+    req = urllib.request.Request(
+        "https://api.inceptionlabs.ai/v1/chat/completions",
+        data=data,
+        method="POST",
+        headers={
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {api_key}",
+        },
+    )
+
+    timeout_sec = run_timeout_seconds(payload)
+    try:
+        with urllib.request.urlopen(req, timeout=timeout_sec) as resp:
+            if not stream:
+                raw = resp.read().decode("utf-8", errors="replace")
+                decoded = json.loads(raw)
+                content = decoded.get("choices", [{}])[0].get("message", {}).get("content", "")
+                if not isinstance(content, str):
+                    return {"edits": [], "diagnostics": ["inception invalid content"]}
+                parsed = extract_json_object(content)
+                if not isinstance(parsed, dict):
+                    return {"edits": [], "diagnostics": ["inception did not return JSON edits"]}
+                return parse_structured_payload(parsed)
+
+            contents: list[str] = []
+            stream_errors: list[str] = []
+            for raw_line in resp:
+                line = raw_line.decode("utf-8", errors="replace").strip()
+                if not line or not line.startswith("data:"):
+                    continue
+                chunk = line[5:].strip()
+                if chunk == "[DONE]":
+                    break
+                try:
+                    event = json.loads(chunk)
+                except json.JSONDecodeError:
+                    continue
+
+                err = event.get("error")
+                if isinstance(err, dict):
+                    msg = err.get("message") or err.get("type") or "inception stream error"
+                    if isinstance(msg, str):
+                        stream_errors.append(msg)
+
+                for choice in event.get("choices", []) if isinstance(event.get("choices"), list) else []:
+                    delta = choice.get("delta")
+                    if isinstance(delta, dict):
+                        text = delta.get("content")
+                        if isinstance(text, str) and text:
+                            contents.append(text)
+
+            parsed = extract_json_object("".join(contents))
+            if not isinstance(parsed, dict):
+                if stream_errors:
+                    return {"edits": [], "diagnostics": stream_errors}
+                return {"edits": [], "diagnostics": ["inception stream returned no JSON edits"]}
+            return parse_structured_payload(parsed, stream_errors)
+
+    except urllib.error.HTTPError as e:
+        detail = ""
+        try:
+            detail = e.read().decode("utf-8", errors="replace")[:600]
+        except Exception:
+            detail = ""
+        return {
+            "edits": [],
+            "diagnostics": [f"inception_http={e.code}", detail],
+        }
+    except urllib.error.URLError as e:
+        return {
+            "edits": [],
+            "diagnostics": [f"inception_network={e.reason}"],
+        }
+    except subprocess.TimeoutExpired:
+        return {"edits": [], "diagnostics": [f"inception timeout ({timeout_sec}s)"]}
+
+
 def call_opencode(payload: dict) -> dict:
     cfg = payload.get("opencode", {}) if isinstance(payload.get("opencode"), dict) else {}
     raw_model = cfg.get("model") or os.getenv("VAER_MODEL")
@@ -165,11 +353,7 @@ def call_opencode(payload: dict) -> dict:
 
     cwd = payload.get("cwd") or os.getcwd()
     target_file = payload.get("target_file", "")
-    timeout_ms = payload.get("request_timeout_ms")
-    if isinstance(timeout_ms, (int, float)):
-        run_timeout_sec = max(20, min(180, int(timeout_ms / 1000) - 2))
-    else:
-        run_timeout_sec = 85
+    run_timeout_sec = run_timeout_seconds(payload)
 
     session_id = load_cached_session_id(cwd, session_scope, target_file)
     prompt = build_prompt(payload)
@@ -271,23 +455,17 @@ def call_opencode(payload: dict) -> dict:
             "diagnostics": ["assistant did not return JSON edits"],
         }
 
-    edits = parsed.get("edits", [])
-    diagnostics = parsed.get("diagnostics", [])
-    if not isinstance(edits, list):
-        edits = []
-    if not isinstance(diagnostics, list):
-        diagnostics = []
-
-    return {
-        "edits": edits,
-        "diagnostics": diagnostics,
-    }
+    return parse_structured_payload(parsed)
 
 
 def main() -> int:
     payload = read_payload()
     try:
-        result = call_opencode(payload)
+        provider = resolve_provider(payload)
+        if provider == "inception":
+            result = call_inception(payload)
+        else:
+            result = call_opencode(payload)
     except Exception as e:
         result = {
             "edits": [],

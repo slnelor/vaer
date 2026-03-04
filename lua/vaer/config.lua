@@ -17,7 +17,7 @@ M.defaults = {
   request = {
     -- External adapter command that receives JSON via stdin and returns JSON on stdout.
     -- Default bundled adapter uses OpenCode CLI (`opencode run`).
-    -- JSON in: { target_file, changedtick, progress_ranges, file_text, cwd, permissions }
+    -- JSON in: { target_file, changedtick, progress_ranges, file_text, cwd, permissions, provider, opencode, inception }
     -- JSON out: { edits = [{ target_file, start_line, end_line, replacement_lines, reason? }] }
     command = nil,
     timeout_ms = 90000,
@@ -48,6 +48,18 @@ M.defaults = {
     provider = nil,
     mode = "code",
     session_scope = "project", -- project | buffer
+  },
+  provider = {
+    -- opencode | inception
+    name = "opencode",
+  },
+  inception = {
+    model = "mercury-2",
+    stream = true,
+    diffusing = false,
+    reasoning_effort = "instant", -- instant | low | medium | high
+    max_tokens = 4096,
+    temperature = 0.0,
   },
   treesitter = {
     enable = true,

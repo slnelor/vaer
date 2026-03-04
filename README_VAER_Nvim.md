@@ -22,29 +22,46 @@ Neovim plugin prototype for HAND/VAER inline coding flow.
 ```lua
 vim.opt.rtp:append("/home/mikhail/ForPython/vaer/proto/vaer")
 require("vaer").setup({
+  provider = {
+    name = "opencode", -- or "inception"
+  },
   opencode = {
     -- model = "openai/gpt-5.3-codex", -- default in plugin, override if needed
     -- provider = "openai", -- optional override
     mode = "code",
     session_scope = "project",
   },
+  inception = {
+    model = "mercury-2",
+    stream = true,
+    diffusing = false,
+    reasoning_effort = "instant",
+  },
 })
 ```
 
 The plugin auto-detects and uses bundled adapter: `scripts/vaer_adapter.py`.
-The adapter uses `opencode run` directly (no `opencode serve` required).
+The adapter supports two providers:
+
+- `opencode` via `opencode run` (no `opencode serve` required)
+- `inception` via direct HTTP (`https://api.inceptionlabs.ai/v1/chat/completions`)
 
 ## Dependencies
 
 - Python 3
-- OpenCode CLI:
+- OpenCode CLI (for `provider.name = "opencode"`):
 
 ```bash
 curl -fsSL https://opencode.ai/install | bash
 ```
 
 Configure OpenCode/provider auth via `opencode` CLI.
-If you set `opencode.model`, make sure it exists for your provider (or leave unset to use your `opencode` default model).
+
+For Inception provider, set:
+
+```bash
+export INCEPTION_API_KEY="your_api_key_here"
+```
 
 ## Stability defaults
 
@@ -76,6 +93,17 @@ Plugin sends JSON via stdin:
     "provider": "openai",
     "mode": "code",
     "session_scope": "project"
+  },
+  "provider": {
+    "name": "opencode"
+  },
+  "inception": {
+    "model": "mercury-2",
+    "stream": true,
+    "diffusing": false,
+    "reasoning_effort": "instant",
+    "max_tokens": 4096,
+    "temperature": 0.0
   }
 }
 ```
