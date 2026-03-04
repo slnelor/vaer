@@ -128,12 +128,15 @@ def build_prompt(payload: dict) -> str:
         "Rules:\n"
         "- You may reason about project context, but edits must target only target_file.\n"
         "- Edits MUST use absolute line numbers from the numbered text block.\n"
-        "- Anchor edits to progress_ranges, but you may extend beyond them when required for a complete, correct implementation.\n"
+        "- Keep edits strictly inside progress_ranges.\n"
         "- If a change needs multiple lines, use as many replacement_lines as necessary.\n"
         "- Never modify import lines unless an import line is explicitly in progress_ranges.\n"
         "- Prefer rewriting invalid/pseudo code into valid code on the same line(s).\n"
         "- Preserve user intent; do not perform unrelated refactors.\n"
+        "- If there is no explicit instruction and code in progress_ranges is already valid, return edits=[] with diagnostics.\n"
+        "- Never add comments/docstrings/placeholders unless explicitly requested in progress_ranges.\n"
         "- Never return TODO/placeholders. If task cannot be completed with available capabilities, return edits=[] and explain in diagnostics.\n"
+        "- Do not add standalone comments unless explicitly requested in file_text.\n"
         "- Do NOT delete code. replacement_lines must include at least one non-empty line.\n"
         "- Keep output concise and valid JSON.\n"
         f"target_file: {target_file}\n"
@@ -336,10 +339,13 @@ def likely_source_code_line(line: str) -> bool:
     if lowered.startswith(code_starts):
         return True
 
-    if re.search(r"[{}();=<>\[\]]", text):
+    if re.search(r"[{};=<>\[\]]", text):
         return True
 
-    if re.search(r"\b[A-Za-z_][A-Za-z0-9_]*\s*\(", text):
+    if re.search(r"^\s*[A-Za-z_][A-Za-z0-9_]*\s*\([^)]*\)\s*:\s*$", text):
+        return True
+
+    if re.search(r"^\s*[A-Za-z_][A-Za-z0-9_]*\s*\([^)]*\)\s*\{\s*$", text):
         return True
 
     return False
@@ -364,6 +370,27 @@ def instruction_candidate_lines(file_text: str) -> list[str]:
         candidates.append(text.lower())
 
     return candidates
+
+
+def explicit_opencode_route_requested(payload: dict) -> bool:
+    file_text = payload.get("file_text")
+    if not isinstance(file_text, str) or not file_text.strip():
+        return False
+
+    lines = instruction_candidate_lines(file_text)
+    if not lines:
+        return False
+
+    text = "\n".join(lines)
+    route_phrases = (
+        "route to opencode",
+        "route request to opencode",
+        "route the request to opencode",
+        "use opencode",
+        "via opencode",
+        "through opencode",
+    )
+    return any(contains_phrase(text, phrase) for phrase in route_phrases)
 
 
 def looks_like_web_research_task(payload: dict) -> bool:
@@ -395,6 +422,9 @@ def looks_like_web_research_task(payload: dict) -> bool:
     if not lines:
         return False
 
+    if explicit_opencode_route_requested(payload):
+        return True
+
     text = "\n".join(lines)
     word_count = len(re.findall(r"[a-z]{2,}", text))
     if word_count < 6:
@@ -423,6 +453,15 @@ def looks_like_web_research_task(payload: dict) -> bool:
         "citations",
         "references",
     )
+    strong_web_phrases = (
+        "web",
+        "internet",
+        "online",
+        "news",
+        "latest",
+        "recent",
+        "current",
+    )
     report_phrases = (
         "write a report",
         "create a report",
@@ -430,15 +469,29 @@ def looks_like_web_research_task(payload: dict) -> bool:
         "summary report",
         "research report",
     )
+    guidance_phrases = (
+        "guide me",
+        "explain",
+        "summary",
+        "summarize",
+        "show me",
+        "in comments",
+        "in comment",
+    )
 
     has_action = any(contains_phrase(text, phrase) for phrase in action_phrases)
     has_web = any(contains_phrase(text, phrase) for phrase in web_phrases)
     has_report = any(contains_phrase(text, phrase) for phrase in report_phrases)
+    has_strong_web = any(contains_phrase(text, phrase) for phrase in strong_web_phrases)
+    has_guidance = any(contains_phrase(text, phrase) for phrase in guidance_phrases)
 
-    if has_report and (has_web or has_action):
+    if has_report and (has_strong_web or (has_action and has_web)):
         return True
 
-    if has_action and has_web and word_count >= 8:
+    if has_action and has_web and has_strong_web and word_count >= 8:
+        return True
+
+    if has_action and has_guidance and word_count >= 8:
         return True
 
     return False
@@ -468,6 +521,9 @@ def should_route_to_opencode_for_web_task(payload: dict) -> tuple[bool, str]:
     }:
         return False, "explicit_task_intent_disabled"
 
+    if explicit_opencode_route_requested(payload):
+        return True, "explicit_opencode_phrase"
+
     if looks_like_web_research_task(payload):
         return True, "heuristic"
 
@@ -491,7 +547,10 @@ def diagnostic_indicates_opencode_failure(message: str) -> bool:
     return False
 
 
-def should_fallback_to_inception(payload: dict, routed: dict) -> bool:
+def should_fallback_to_inception(payload: dict, routed: dict, route_reason: str | None = None) -> bool:
+    if route_reason == "explicit_opencode_phrase":
+        return False
+
     if not provider_route_fallback_to_inception_on_error(payload):
         return False
 
@@ -501,7 +560,7 @@ def should_fallback_to_inception(payload: dict, routed: dict) -> bool:
 
     diagnostics = routed.get("diagnostics")
     if not isinstance(diagnostics, list) or not diagnostics:
-        return True
+        return False
 
     return any(
         isinstance(item, str) and diagnostic_indicates_opencode_failure(item)
@@ -525,7 +584,7 @@ def call_inception(payload: dict) -> dict:
 
     model = cfg.get("model") if isinstance(cfg.get("model"), str) and cfg.get("model") else "mercury-2"
     stream = bool(cfg.get("stream", True))
-    diffusing = bool(cfg.get("diffusing", False))
+    # Streaming-only mode: do not enable diffusion.
     reasoning_effort = cfg.get("reasoning_effort") if isinstance(cfg.get("reasoning_effort"), str) else "instant"
     max_tokens = cfg.get("max_tokens") if isinstance(cfg.get("max_tokens"), int) else 4096
     temperature = cfg.get("temperature") if isinstance(cfg.get("temperature"), (int, float)) else 0.0
@@ -543,8 +602,6 @@ def call_inception(payload: dict) -> dict:
         "temperature": temperature,
         "stream": stream,
     }
-    if stream and diffusing:
-        body["diffusing"] = True
 
     data = json.dumps(body).encode("utf-8")
     req = urllib.request.Request(
@@ -754,7 +811,7 @@ def main() -> int:
                 add_diagnostic(routed, "auto_routed_to_opencode_for_web_research")
                 add_diagnostic(routed, f"web_route_reason={route_reason}")
 
-                if should_fallback_to_inception(payload, routed):
+                if should_fallback_to_inception(payload, routed, route_reason):
                     result = call_inception(payload)
                     add_diagnostic(result, "web_route_fallback_to_inception")
                     add_diagnostic(result, f"web_route_reason={route_reason}")

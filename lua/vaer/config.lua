@@ -38,6 +38,9 @@ M.defaults = {
     max_replacement_lines = 240,
     max_total_replacement_lines = 480,
     reject_blank_replacements = true,
+    reject_placeholder_replacements = true,
+    reject_comment_only_replacements = true,
+    require_full_progress_containment = true,
   },
   safety = {
     max_cached_progress_lines = 500,

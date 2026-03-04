@@ -10,6 +10,7 @@ local persistence = require("vaer.persistence")
 local M = {}
 local state = state_mod.new()
 local dispatch_enter
+local changed_span_has_non_empty_content
 
 local function merged_ranges(ranges)
   if #ranges == 0 then
@@ -154,7 +155,8 @@ local function ensure_buffer_attached(bufnr)
       if state.mode == "VAER" and state.opts.request.trigger == "newline" then
         local current_line_count = vim.api.nvim_buf_line_count(buf)
         local newline_created = (new_lastline > lastline) or (current_line_count > prev_line_count)
-        if newline_created then
+        local change_has_content = changed_span_has_non_empty_content(buf, firstline, new_lastline)
+        if newline_created and change_has_content then
           schedule_dispatch(buf)
         end
       end
@@ -220,6 +222,18 @@ local function has_non_empty_progress_content(bufnr, ranges)
       if vim.trim(line) ~= "" then
         return true
       end
+    end
+  end
+  return false
+end
+
+changed_span_has_non_empty_content = function(bufnr, firstline_zero, new_lastline_zero)
+  local start_line = firstline_zero + 1
+  local finish_line = math.max(start_line, new_lastline_zero)
+  local lines = vim.api.nvim_buf_get_lines(bufnr, start_line - 1, finish_line, false)
+  for _, line in ipairs(lines) do
+    if vim.trim(line) ~= "" then
+      return true
     end
   end
   return false

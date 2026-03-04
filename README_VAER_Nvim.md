@@ -54,12 +54,20 @@ When `provider.name = "inception"`, the adapter can auto-route web-research/repo
 to `opencode` (tool-capable path) if `provider.route_web_tasks_to_opencode = true`.
 Routing uses explicit `provider.task_intent` when provided, otherwise falls back to a
 natural-language heuristic over the in-progress text.
+Including phrases like `route the request to opencode` in the in-progress text forces
+OpenCode routing for that request.
 
 If a routed OpenCode request fails operationally, the adapter can fall back to Inception
 when `provider.route_fallback_to_inception_on_error = true`.
+If the request explicitly asks to route to OpenCode, this fallback is skipped.
 
-Note on streaming: Inception streaming is consumed in the adapter, but buffer edits are still applied
-as a single batch when the request finishes.
+Note on streaming: Inception runs in streaming-only mode (no diffusing). Stream chunks are consumed
+in the adapter, but buffer edits are still applied as a single batch when the request finishes.
+
+Strict safety defaults:
+- edits must be fully contained within `progress_ranges`
+- placeholder-style replacements (`TODO`, `placeholder`, etc.) are rejected
+- comment-only replacements are rejected unless replacing existing comment lines
 
 ## Dependencies
 

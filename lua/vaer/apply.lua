@@ -38,10 +38,16 @@ local function validate_no_complete_lines(state, bufnr, edit)
   return true
 end
 
-local function is_inside_progress_ranges(progress_ranges, edit)
+local function is_inside_progress_ranges(progress_ranges, edit, require_full_containment)
   for _, r in ipairs(progress_ranges or {}) do
-    if edit.start_line <= r.end_line and edit.end_line >= r.start_line then
-      return true
+    if require_full_containment then
+      if edit.start_line >= r.start_line and edit.end_line <= r.end_line then
+        return true
+      end
+    else
+      if edit.start_line <= r.end_line and edit.end_line >= r.start_line then
+        return true
+      end
     end
   end
   return false
@@ -61,6 +67,54 @@ local function is_blank_only(lines)
     end
   end
   return true
+end
+
+local function is_comment_line(line)
+  local text = vim.trim(line)
+  if text == "" then
+    return false
+  end
+  return text:match("^#") ~= nil
+    or text:match("^//") ~= nil
+    or text:match("^%-%-") ~= nil
+    or text:match("^/%*") ~= nil
+    or text:match("^%*%s") ~= nil
+    or text:match("^%*/") ~= nil
+end
+
+local function is_comment_only(lines)
+  local has_comment = false
+  for _, line in ipairs(lines) do
+    local text = vim.trim(line)
+    if text ~= "" then
+      if not is_comment_line(text) then
+        return false
+      end
+      has_comment = true
+    end
+  end
+  return has_comment
+end
+
+local function has_placeholder_patterns(lines)
+  for _, line in ipairs(lines) do
+    local text = vim.trim(line):lower()
+    if text ~= "" then
+      if text:find("todo", 1, true)
+        or text:find("tbd", 1, true)
+        or text:find("fixme", 1, true)
+        or text:find("placeholder", 1, true)
+        or text:find("to be implemented", 1, true)
+        or text:find("fill in", 1, true)
+      then
+        return true
+      end
+      if text == "..." then
+        return true
+      end
+    end
+  end
+  return false
 end
 
 local function is_noop_edit(bufnr, edit)
@@ -97,6 +151,15 @@ function M.apply_result(state, bufnr, ctx, result)
   local reject_blank_replacements = state.opts.apply == nil
     or state.opts.apply.reject_blank_replacements == nil
     or state.opts.apply.reject_blank_replacements
+  local reject_placeholder_replacements = state.opts.apply == nil
+    or state.opts.apply.reject_placeholder_replacements == nil
+    or state.opts.apply.reject_placeholder_replacements
+  local reject_comment_only_replacements = state.opts.apply == nil
+    or state.opts.apply.reject_comment_only_replacements == nil
+    or state.opts.apply.reject_comment_only_replacements
+  local require_full_progress_containment = state.opts.apply == nil
+    or state.opts.apply.require_full_progress_containment == nil
+    or state.opts.apply.require_full_progress_containment
   local buf_line_count = vim.api.nvim_buf_line_count(bufnr)
   local total_replacement_lines = 0
 
@@ -129,7 +192,7 @@ function M.apply_result(state, bufnr, ctx, result)
     if edit.target_file ~= ctx.target_file then
       return { status = "failed", blocked_reason = "blocked_non_current_file_edit", diagnostics = { "cross_file_write_blocked" } }
     end
-    if not is_inside_progress_ranges(ctx.progress_ranges, edit) then
+    if not is_inside_progress_ranges(ctx.progress_ranges, edit, require_full_progress_containment) then
       goto continue
     end
     if is_destructive_empty(edit) then
@@ -138,6 +201,18 @@ function M.apply_result(state, bufnr, ctx, result)
     if reject_blank_replacements and is_blank_only(edit.replacement_lines) then
       goto continue
     end
+    if reject_placeholder_replacements and has_placeholder_patterns(edit.replacement_lines) then
+      goto continue
+    end
+
+    local current_lines = vim.api.nvim_buf_get_lines(bufnr, edit.start_line - 1, edit.end_line, false)
+    if reject_comment_only_replacements
+      and is_comment_only(edit.replacement_lines)
+      and not is_comment_only(current_lines)
+    then
+      goto continue
+    end
+
     local ok, msg = validate_no_complete_lines(state, bufnr, edit)
     if not ok then
       goto continue
