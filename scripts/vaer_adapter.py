@@ -128,11 +128,12 @@ def build_prompt(payload: dict) -> str:
         "Rules:\n"
         "- You may reason about project context, but edits must target only target_file.\n"
         "- Edits MUST use absolute line numbers from the numbered text block.\n"
-        "- Keep edits strictly inside progress_ranges.\n"
+        "- Anchor edits to progress_ranges, but you may extend beyond them when required for a complete, correct implementation.\n"
+        "- If a change needs multiple lines, use as many replacement_lines as necessary.\n"
         "- Never modify import lines unless an import line is explicitly in progress_ranges.\n"
         "- Prefer rewriting invalid/pseudo code into valid code on the same line(s).\n"
         "- Preserve user intent; do not perform unrelated refactors.\n"
-        "- If uncertain, return edits=[] and explain in diagnostics.\n"
+        "- Never return TODO/placeholders. If task cannot be completed with available capabilities, return edits=[] and explain in diagnostics.\n"
         "- Do NOT delete code. replacement_lines must include at least one non-empty line.\n"
         "- Keep output concise and valid JSON.\n"
         f"target_file: {target_file}\n"
@@ -251,6 +252,269 @@ def resolve_provider(payload: dict) -> str:
         return env_name.lower()
 
     return "opencode"
+
+
+def provider_routes_web_tasks(payload: dict) -> bool:
+    cfg = payload.get("provider")
+    if isinstance(cfg, dict):
+        route = cfg.get("route_web_tasks_to_opencode")
+        if isinstance(route, bool):
+            return route
+    return True
+
+
+def provider_route_fallback_to_inception_on_error(payload: dict) -> bool:
+    cfg = payload.get("provider")
+    if isinstance(cfg, dict):
+        fallback = cfg.get("route_fallback_to_inception_on_error")
+        if isinstance(fallback, bool):
+            return fallback
+    return True
+
+
+def provider_task_intent(payload: dict) -> str | None:
+    cfg = payload.get("provider")
+    if isinstance(cfg, dict):
+        raw = cfg.get("task_intent")
+        if isinstance(raw, str):
+            intent = raw.strip().lower().replace("-", "_")
+            if intent:
+                return intent
+
+    raw = payload.get("task_intent")
+    if isinstance(raw, str):
+        intent = raw.strip().lower().replace("-", "_")
+        if intent:
+            return intent
+
+    return None
+
+
+def strip_numbered_file_text(file_text: str) -> str:
+    out: list[str] = []
+    for raw_line in file_text.splitlines():
+        match = re.match(r"^\s*\d+\|\s?(.*)$", raw_line)
+        if match:
+            out.append(match.group(1))
+        else:
+            out.append(raw_line)
+    return "\n".join(out)
+
+
+def contains_phrase(text: str, phrase: str) -> bool:
+    if " " in phrase:
+        return phrase in text
+    return re.search(rf"\b{re.escape(phrase)}\b", text) is not None
+
+
+def likely_source_code_line(line: str) -> bool:
+    text = line.strip()
+    if not text:
+        return False
+
+    lowered = text.lower()
+    code_starts = (
+        "def ",
+        "class ",
+        "function ",
+        "import ",
+        "from ",
+        "return ",
+        "const ",
+        "let ",
+        "var ",
+        "local ",
+        "if ",
+        "for ",
+        "while ",
+        "try:",
+        "except",
+        "public ",
+        "private ",
+        "package ",
+    )
+    if lowered.startswith(code_starts):
+        return True
+
+    if re.search(r"[{}();=<>\[\]]", text):
+        return True
+
+    if re.search(r"\b[A-Za-z_][A-Za-z0-9_]*\s*\(", text):
+        return True
+
+    return False
+
+
+def instruction_candidate_lines(file_text: str) -> list[str]:
+    candidates: list[str] = []
+    for raw_line in strip_numbered_file_text(file_text).splitlines():
+        text = raw_line.strip()
+        if not text:
+            continue
+
+        text = re.sub(r"^\s*(#|//|--|\*+)\s?", "", text)
+        text = re.sub(r"^\s*\d+[.)]\s+", "", text)
+        text = text.strip()
+        if not text:
+            continue
+
+        if likely_source_code_line(text):
+            continue
+
+        candidates.append(text.lower())
+
+    return candidates
+
+
+def looks_like_web_research_task(payload: dict) -> bool:
+    intent = provider_task_intent(payload)
+    if intent in {
+        "web",
+        "web_research",
+        "research",
+        "research_report",
+        "web_report",
+        "report",
+    }:
+        return True
+    if intent in {
+        "code",
+        "code_edit",
+        "inline_edit",
+        "refactor",
+        "fix",
+        "fix_code",
+    }:
+        return False
+
+    file_text = payload.get("file_text")
+    if not isinstance(file_text, str) or not file_text.strip():
+        return False
+
+    lines = instruction_candidate_lines(file_text)
+    if not lines:
+        return False
+
+    text = "\n".join(lines)
+    word_count = len(re.findall(r"[a-z]{2,}", text))
+    if word_count < 6:
+        return False
+
+    action_phrases = (
+        "research",
+        "search",
+        "look up",
+        "investigate",
+        "collect sources",
+        "find sources",
+        "find references",
+        "cite sources",
+        "gather references",
+    )
+    web_phrases = (
+        "web",
+        "internet",
+        "online",
+        "latest",
+        "recent",
+        "current",
+        "news",
+        "sources",
+        "citations",
+        "references",
+    )
+    report_phrases = (
+        "write a report",
+        "create a report",
+        "prepare a report",
+        "summary report",
+        "research report",
+    )
+
+    has_action = any(contains_phrase(text, phrase) for phrase in action_phrases)
+    has_web = any(contains_phrase(text, phrase) for phrase in web_phrases)
+    has_report = any(contains_phrase(text, phrase) for phrase in report_phrases)
+
+    if has_report and (has_web or has_action):
+        return True
+
+    if has_action and has_web and word_count >= 8:
+        return True
+
+    return False
+
+
+def should_route_to_opencode_for_web_task(payload: dict) -> tuple[bool, str]:
+    if not provider_routes_web_tasks(payload):
+        return False, "route_disabled"
+
+    intent = provider_task_intent(payload)
+    if intent in {
+        "web",
+        "web_research",
+        "research",
+        "research_report",
+        "web_report",
+        "report",
+    }:
+        return True, "explicit_task_intent"
+    if intent in {
+        "code",
+        "code_edit",
+        "inline_edit",
+        "refactor",
+        "fix",
+        "fix_code",
+    }:
+        return False, "explicit_task_intent_disabled"
+
+    if looks_like_web_research_task(payload):
+        return True, "heuristic"
+
+    return False, "not_web_task"
+
+
+def diagnostic_indicates_opencode_failure(message: str) -> bool:
+    text = message.strip().lower()
+    if not text:
+        return False
+
+    if text.startswith("opencode "):
+        return True
+    if text.startswith("opencode_"):
+        return True
+    if text.startswith("assistant did not return json edits"):
+        return True
+    if text.startswith("adapter_error"):
+        return True
+
+    return False
+
+
+def should_fallback_to_inception(payload: dict, routed: dict) -> bool:
+    if not provider_route_fallback_to_inception_on_error(payload):
+        return False
+
+    edits = routed.get("edits")
+    if isinstance(edits, list) and edits:
+        return False
+
+    diagnostics = routed.get("diagnostics")
+    if not isinstance(diagnostics, list) or not diagnostics:
+        return True
+
+    return any(
+        isinstance(item, str) and diagnostic_indicates_opencode_failure(item)
+        for item in diagnostics
+    )
+
+
+def add_diagnostic(result: dict, message: str):
+    diagnostics = result.get("diagnostics")
+    if isinstance(diagnostics, list):
+        diagnostics.append(message)
+    else:
+        result["diagnostics"] = [message]
 
 
 def call_inception(payload: dict) -> dict:
@@ -425,9 +689,9 @@ def call_opencode(payload: dict) -> dict:
                 if isinstance(err, dict):
                     data = err.get("data")
                     if isinstance(data, dict) and isinstance(data.get("message"), str):
-                        event_errors_local.append(data["message"])
+                        event_errors_local.append(f"opencode_event_error={data['message']}")
                     elif isinstance(err.get("name"), str):
-                        event_errors_local.append(err["name"])
+                        event_errors_local.append(f"opencode_event_error={err['name']}")
 
             if event.get("type") == "text":
                 part = event.get("part", {})
@@ -445,7 +709,7 @@ def call_opencode(payload: dict) -> dict:
     except subprocess.TimeoutExpired:
         return {"edits": [], "diagnostics": [f"opencode run timeout ({run_timeout_sec}s)"]}
 
-    if event_errors and any("Model not found:" in e for e in event_errors):
+    if event_errors and any("model not found:" in e.lower() for e in event_errors):
         clear_cached_session_id(cwd, session_scope, target_file)
         try:
             proc, text_parts, event_errors, new_session_id = run_once(False, False)
@@ -484,7 +748,27 @@ def main() -> int:
     try:
         provider = resolve_provider(payload)
         if provider == "inception":
-            result = call_inception(payload)
+            route_to_opencode, route_reason = should_route_to_opencode_for_web_task(payload)
+            if route_to_opencode:
+                routed = call_opencode(payload)
+                add_diagnostic(routed, "auto_routed_to_opencode_for_web_research")
+                add_diagnostic(routed, f"web_route_reason={route_reason}")
+
+                if should_fallback_to_inception(payload, routed):
+                    result = call_inception(payload)
+                    add_diagnostic(result, "web_route_fallback_to_inception")
+                    add_diagnostic(result, f"web_route_reason={route_reason}")
+
+                    diagnostics = routed.get("diagnostics")
+                    if isinstance(diagnostics, list):
+                        for item in diagnostics:
+                            if isinstance(item, str) and diagnostic_indicates_opencode_failure(item):
+                                add_diagnostic(result, f"web_route_opencode_diagnostic={item}")
+                                break
+                else:
+                    result = routed
+            else:
+                result = call_inception(payload)
         else:
             result = call_opencode(payload)
     except Exception as e:

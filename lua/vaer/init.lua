@@ -281,6 +281,9 @@ dispatch_enter = function(bufnr)
     },
     provider = {
       name = state.opts.provider.name,
+      route_web_tasks_to_opencode = state.opts.provider.route_web_tasks_to_opencode,
+      task_intent = state.opts.provider.task_intent,
+      route_fallback_to_inception_on_error = state.opts.provider.route_fallback_to_inception_on_error,
     },
     inception = {
       model = state.opts.inception.model,

@@ -52,6 +52,13 @@ M.defaults = {
   provider = {
     -- opencode | inception
     name = "opencode",
+    -- When provider is inception, route web-research/report style requests to opencode.
+    route_web_tasks_to_opencode = true,
+    -- Optional explicit routing hint: nil|"auto" uses heuristic, "web_research" forces route,
+    -- and "code_edit" forces no route.
+    task_intent = nil,
+    -- If routed opencode call fails, try inception as fallback.
+    route_fallback_to_inception_on_error = true,
   },
   inception = {
     model = "mercury-2",

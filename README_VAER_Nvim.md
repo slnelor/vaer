@@ -24,6 +24,9 @@ vim.opt.rtp:append("/home/mikhail/ForPython/vaer/proto/vaer")
 require("vaer").setup({
   provider = {
     name = "inception", -- or "opencode"
+    route_web_tasks_to_opencode = true, -- auto-route web-research/report tasks via opencode tools
+    task_intent = nil, -- nil|"auto" (heuristic), "web_research", or "code_edit"
+    route_fallback_to_inception_on_error = true, -- retry with inception when routed opencode call fails
   },
   opencode = {
     -- model = "openai/gpt-5.3-codex", -- default in plugin, override if needed
@@ -46,6 +49,17 @@ The adapter supports two providers:
 
 - `opencode` via `opencode run` (no `opencode serve` required)
 - `inception` via direct HTTP (`https://api.inceptionlabs.ai/v1/chat/completions`)
+
+When `provider.name = "inception"`, the adapter can auto-route web-research/report style tasks
+to `opencode` (tool-capable path) if `provider.route_web_tasks_to_opencode = true`.
+Routing uses explicit `provider.task_intent` when provided, otherwise falls back to a
+natural-language heuristic over the in-progress text.
+
+If a routed OpenCode request fails operationally, the adapter can fall back to Inception
+when `provider.route_fallback_to_inception_on_error = true`.
+
+Note on streaming: Inception streaming is consumed in the adapter, but buffer edits are still applied
+as a single batch when the request finishes.
 
 ## Dependencies
 
@@ -104,7 +118,10 @@ Plugin sends JSON via stdin:
     "session_scope": "project"
   },
   "provider": {
-    "name": "opencode"
+    "name": "opencode",
+    "route_web_tasks_to_opencode": true,
+    "task_intent": "web_research",
+    "route_fallback_to_inception_on_error": true
   },
   "inception": {
     "model": "mercury-2",
